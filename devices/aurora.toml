@@ -118,7 +118,7 @@ groups = ["root"]
 
 [[service]]
 path = "/system/bin/sh"
-args = ["-c", "chmod 666 /dev/nq-nci 2>/dev/null || true"]
+args = ["-c", "chmod 666 /dev/nq-nci 2>/dev/null || true; V=$(ls -d /system_dlkm/lib/modules/*/kernel/net/rfkill 2>/dev/null | head -1); T=/system_dlkm/flatten/lib/modules/rfkill.ko; if [ -n \"$V\" ] && [ -f \"$V/rfkill.ko\" ] && [ -f \"$T\" ]; then mount --bind \"$V/rfkill.ko\" \"$T\" 2>/dev/null || true; fi"]
 oneshot = true
 user = "root"
 groups = ["root"]
