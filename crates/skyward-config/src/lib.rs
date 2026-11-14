@@ -335,6 +335,10 @@ pub struct Partitions {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Service {
     pub path: String,
+    /// Other places the same program may live, tried in order when `path`
+    /// is not there, so one build's name or partition does not stop it.
+    #[serde(default)]
+    pub alternates: Vec<String>,
     /// What the program is given after its own path, as init gives a
     /// service the words after its path.
     #[serde(default)]
