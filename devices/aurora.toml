@@ -122,3 +122,14 @@ args = ["-c", "chmod 666 /dev/nq-nci 2>/dev/null || true"]
 oneshot = true
 user = "root"
 groups = ["root"]
+
+[[service]]
+path = "/system/bin/sh"
+args = ["-c", "V=$(ls -d /system_dlkm/lib/modules/*/kernel/net/rfkill 2>/dev/null | head -1); [ -n \"$V\" ] || { echo \"no rfkill.ko under /system_dlkm/lib/modules\"; exit 0; }; T=/system_dlkm/flatten/lib/modules/rfkill.ko; if [ -f \"$T\" ]; then mount --bind \"$V/rfkill.ko\" \"$T\" || { echo \"could not lay it over $T\"; exit 0; }; else mkdir -p /lib/modules || { echo \"could not make /lib/modules\"; exit 0; }; cp \"$V/rfkill.ko\" /lib/modules/rfkill.ko || { echo \"could not copy rfkill.ko\"; exit 0; }; printf 'rfkill.ko:\\n' > /lib/modules/modules.dep || { echo \"could not write modules.dep\"; exit 0; }; echo \"put the signed rfkill.ko in /lib/modules\"; fi"]
+oneshot = true
+user = "root"
+groups = ["root"]
+
+# The credential service of the older kind refuses everything while it
+# looks for the secure processing unit the recovery does not carry; the
+# phone's own recovery turns that search off before starting it.
