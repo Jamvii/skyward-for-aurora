@@ -372,6 +372,7 @@ fn started(phone: &Phone, program: &Program, ready: Ready, registers: Vec<String
     };
     let service = Service {
         path: phone.started_from(&program.path),
+        alternates: Vec::new(),
         args: program.args.clone(),
         libraries: libraries_of(&program.path),
         oneshot: false,

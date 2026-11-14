@@ -102,7 +102,32 @@ pub fn serves_elements(steps: &[Step]) -> bool {
 pub fn start(steps: &[Step], libraries: Option<&Path>) -> Result<()> {
     for step in steps {
         match step {
-            Step::Start(program) => crate::services::start(std::slice::from_ref(program.as_ref()), libraries)?,
+            Step::Start(program) => {
+                let mut program = (**program).clone();
+                let path = program.service.path.clone();
+                if path.contains("weaver") && path.ends_with(".nxp-qti") {
+                    let plain = path.trim_end_matches("-qti").to_string();
+                    let hyphen = plain.replace("weaver-service.", "weaver-service-");
+                    let chosen = [plain, hyphen].into_iter().find(|candidate| Path::new(candidate).is_file());
+                    if let Some(chosen) = chosen {
+                        skyward_sys::kmsg(&format!("{path} is there; using the direct weaver {chosen}"))?;
+                        program.service.path = chosen;
+                    }
+                }
+                let path = program.service.path.clone();
+                if path.contains("keymint-service")
+                    || path.contains("gatekeeper-service")
+                    || path.contains("secure_element")
+                    || path.contains("weaver")
+                {
+                    program.service.args = vec![path];
+                    program.service.path = "/kmlibs/km.sh".into();
+                    if !program.service.libraries.iter().any(|l| l == "/kmlibs") {
+                        program.service.libraries.insert(0, "/kmlibs".into());
+                    }
+                }
+                crate::services::start(std::slice::from_ref(&program), libraries)?;
+            }
             Step::ServeElements => {
                 let readers = skyward_omapi::start()?;
                 skyward_sys::kmsg(&format!("{} is served, with a reader for each of {} secure elements: {}", skyward_omapi::SERVICE, readers.len(), readers.join(", ")))?;

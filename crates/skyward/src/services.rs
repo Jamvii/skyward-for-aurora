@@ -105,6 +105,12 @@ fn accounts() -> HashMap<String, u32> {
 /// runs as and what init hands it.
 fn readied(program: &Started, libraries: Option<&Path>, known: &HashMap<String, u32>) -> Result<(Service, Credentials, Given)> {
     let mut s = program.service.clone();
+    if !Path::new(&s.path).is_file()
+        && let Some(found) = s.alternates.iter().find(|path| Path::new(path).is_file())
+    {
+        skyward_sys::kmsg(&format!("{} is not there; using {found}", s.path))?;
+        s.path = found.clone();
+    }
     if !Path::new(&s.path).is_file() {
         bail!("{} is missing; is its partition mounted?", s.path);
     }
