@@ -2505,6 +2505,23 @@ fn ensure_aera_runtime() -> Result<()> {
     fn decrypt_told(&mut self, now: u64) -> Result<()> {
         self.aera_told()?;
         self.downloads_told();
+        // Returning to the home page ends the browser process. Keep it only
+        // while an AERA download is still running, so background downloads
+        // are not cut off.
+        if self.app.screen() == Screen::Home && self.aera.is_some() {
+            let background = self.app.state.downloads.items.iter().any(|d| {
+                d.source == skyward_ui::app::DownloadSource::Aera && d.active()
+            });
+            if !background {
+                Self::aera_log("browser closed on returning home");
+                self.aera = None;
+                self.aera_frame_at = None;
+                self.app.state.aera.started = false;
+                self.app.state.aera.frame = None;
+                self.app.state.aera.keyboard = None;
+                self.app.refresh();
+            }
+        }
         let mut stream_dead = false;
         if let Some(worker) = &self.browser_stream {
             for ev in worker.events() {

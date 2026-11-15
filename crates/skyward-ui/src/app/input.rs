@@ -123,9 +123,12 @@ impl App {
                 }
                 if self.screen() == Screen::AeraBrowser {
                     // Everything outside the page (bar, status, sheets) is
-                    // fixed; a drag there must not move the page.
+                    // fixed. An edge press still starts the back swipe even
+                    // when it lands on no control.
                     if let Some((action, _)) = hit {
                         self.drag = Drag::Press { x, y, action: Some(action), edge: at_edge, at: now };
+                    } else if at_edge.is_some() {
+                        self.drag = Drag::Press { x, y, action: None, edge: at_edge, at: now };
                     } else {
                         self.drag = Drag::Held;
                     }
