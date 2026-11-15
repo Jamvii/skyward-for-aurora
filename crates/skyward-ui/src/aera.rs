@@ -35,7 +35,6 @@ pub fn browser(cx: &Ctx) -> Frame {
     let back = Rect::new(m.dp(16.0), status_h + m.dp(12.0), m.dp(44.0), m.dp(44.0));
     c.fill_circle(back.x + back.w / 2.0, back.y + back.h / 2.0, back.w / 2.0, WHITE);
     c.text_center(&f.value, "<", back.x + back.w / 2.0, back.y + back.h / 2.0, m.dp(22.0), INK);
-    out.push(Hit { rect: back, action: Action::Back });
 
     // Page touches at the worker's 360x700 view coordinates.
     let (cols, rows) = (12, 20);
@@ -161,6 +160,8 @@ pub fn browser(cx: &Ctx) -> Frame {
         }
     }
 
+    // Keep the back button above the page's touch grid and sheets.
+    out.push(Hit { rect: back, action: Action::Back });
     let mut page = Frame::new(t, c, out, "AERA", 0.0);
     page.back = false;
     page.header = false;

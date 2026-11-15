@@ -112,11 +112,13 @@ impl App {
                     .filter(|&(a, r)| self.frame.as_ref().is_some_and(|fr| fr.hits.contains(&Hit { rect: r, action: a })))
                     .filter(|&(a, r)| row_wide(&t, r) && !matches!(a, Action::Open(Screen::Search) | Action::Confirm(_) | Action::TypeInto(_)))
                     .map(|(_, r)| r);
-                if let Some((Action::AeraTap(..), _)) = hit {
-                    if let Some((vx, vy)) = crate::aera::view_point(&m, x, y) {
-                        self.drag = Drag::Aera { x: vx, y: vy };
-                        fx.push(Effect::AeraTouch { kind: AeraTouchKind::Down, x: vx, y: vy });
-                        return fx;
+                if at_edge.is_none() {
+                    if let Some((Action::AeraTap(..), _)) = hit {
+                        if let Some((vx, vy)) = crate::aera::view_point(&m, x, y) {
+                            self.drag = Drag::Aera { x: vx, y: vy };
+                            fx.push(Effect::AeraTouch { kind: AeraTouchKind::Down, x: vx, y: vy });
+                            return fx;
+                        }
                     }
                 }
                 if self.screen() == Screen::AeraBrowser {
@@ -159,6 +161,19 @@ impl App {
                         fx.push(Effect::AeraTouch { kind: AeraTouchKind::Move, x: vx, y: vy });
                     } else {
                         self.drag = Drag::Aera { x: lx, y: ly };
+                    }
+                }
+                Drag::Press { x: x0, y: y0, edge: Some(from_left), .. }
+                    if self.screen() == Screen::AeraBrowser =>
+                {
+                    // An edge swipe still owns the left/right screen edge;
+                    // a vertical drag on the chrome does not scroll the page.
+                    let (dx, dy) = (x - x0, y - y0);
+                    if dx.abs() > slop && dx.abs() > dy.abs() {
+                        self.dirty = true;
+                        self.drag = Drag::Edge { start: x0, from_left, armed: false, x, cy: y0 - m.dp(CUE_LIFT_DP) };
+                    } else {
+                        self.drag = Drag::Held;
                     }
                 }
                 Drag::Press { .. } if self.screen() == Screen::AeraBrowser => {
