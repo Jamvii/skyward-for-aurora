@@ -2424,7 +2424,7 @@ fn ensure_aera_runtime() -> Result<()> {
             let due = self
                 .aera_frame_at
                 .is_none_or(|last| now_at.duration_since(last) >= Duration::from_millis(33));
-            if due {
+            if due && self.app.screen() == Screen::AeraBrowser {
                 if let Some(frame) = process.session().frame() {
                     self.app.state.aera.frame = Some(frame.to_vec());
                     self.aera_frame_at = Some(now_at);

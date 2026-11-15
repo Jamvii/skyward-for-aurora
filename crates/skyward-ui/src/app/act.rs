@@ -343,7 +343,10 @@ impl App {
                 }
             }
             Action::AeraTap(x, y) => return vec![Effect::AeraTap { x, y }],
-            Action::OpenDownloads => self.open(Screen::Downloads),
+            Action::OpenDownloads => {
+                self.state.aera.panel = None;
+                self.open(Screen::Downloads);
+            }
             Action::OpenDownloadLink => {
                 self.state.downloads.error = None;
                 self.state.layer = Layer::Letters;

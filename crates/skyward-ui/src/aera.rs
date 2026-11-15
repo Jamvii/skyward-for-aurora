@@ -138,6 +138,7 @@ pub fn browser(cx: &Ctx) -> Frame {
                 } else {
                     s.aera.bookmarks.iter().enumerate().rev().take(6).map(|(i, u)| (i, u.clone())).collect()
                 };
+                let mut add_y = top + m.dp(70.0);
                 if entries.is_empty() {
                     c.text(&f.value, l.pick(["暂无记录", "暫無記錄", "Nothing here yet"]), m.margin, top + m.dp(74.0), m.dp(14.0), t.pal.subtitle, None);
                 } else {
@@ -151,9 +152,10 @@ pub fn browser(cx: &Ctx) -> Frame {
                         let action = if panel == AeraPanel::History { Action::AeraHistoryOpen(*index) } else { Action::AeraBookmarkOpen(*index) };
                         out.push(Hit { rect: list.rows[k], action });
                     }
+                    add_y = list.bottom + m.dp(8.0);
                 }
                 if panel == AeraPanel::Bookmarks {
-                    let add = widgets::list(&mut c, t, f, top + m.dp(354.0), &[
+                    let add = widgets::list(&mut c, t, f, add_y, &[
                         Row::new(l.pick(["收藏当前页面", "收藏目前頁面", "Bookmark this page"])).icon(GREEN, Icon::Backup).trail(Trail::None)
                     ]);
                     out.push(Hit { rect: add.rows[0], action: Action::AeraBookmarkCurrent });
