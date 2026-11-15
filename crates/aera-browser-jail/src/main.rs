@@ -80,6 +80,9 @@ fn run(root: &Path) -> Result<(), String> {
     let _ = std::fs::set_permissions(&resolv_path, std::os::unix::fs::PermissionsExt::from_mode(0o644));
     let downloads = Path::new("/sdcard/AERA/Downloads");
     if std::fs::create_dir_all(downloads).is_ok() {
+        // The worker is in neither media_rw nor root; the parent must be
+        // traversable as well as the download folder writable.
+        let _ = std::fs::set_permissions(Path::new("/sdcard/AERA"), std::os::unix::fs::PermissionsExt::from_mode(0o771));
         let _ = std::fs::set_permissions(downloads, std::os::unix::fs::PermissionsExt::from_mode(0o777));
     }
     for (source, inside) in [

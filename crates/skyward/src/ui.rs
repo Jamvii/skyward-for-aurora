@@ -1232,6 +1232,9 @@ struct Pages<'a> {
     /// When the last AERA frame was copied for the UI; frames arriving
     /// faster than the page can be scaled are dropped.
     aera_frame_at: Option<Instant>,
+    /// When the browser was left for Home, kept briefly so a download
+    /// starting on the way out is not cut off.
+    aera_home_since: Option<Instant>,
     /// A copy into the USB drive has it writable until the copy ends.
     usb_writable: bool,
     /// The WLAN, on a phone whose driver the recovery brings up.
@@ -1450,6 +1453,7 @@ impl<'a> Pages<'a> {
             download_jobs: Vec::new(),
             aera: None,
             aera_frame_at: None,
+            aera_home_since: None,
             usb_writable: false,
             wlan: None,
             scanned_at: Instant::now(),
@@ -2450,6 +2454,7 @@ fn ensure_aera_runtime() -> Result<()> {
         let session = process.session();
         let downloads = session.take_downloads();
         for d in downloads {
+            Self::aera_log(&format!("download {:?} id={} name={} done={} total={:?}", d.event, d.id, d.name, d.done, d.total));
             let event = match d.event {
                 skyward_aera::DownloadEvent::Started => skyward_ui::app::DownloadEventKind::Started,
                 skyward_aera::DownloadEvent::Progress => skyward_ui::app::DownloadEventKind::Progress,
@@ -2517,22 +2522,26 @@ fn ensure_aera_runtime() -> Result<()> {
     fn decrypt_told(&mut self, now: u64) -> Result<()> {
         self.aera_told()?;
         self.downloads_told();
-        // Returning to the home page ends the browser process. Keep it only
-        // while an AERA download is still running, so background downloads
-        // are not cut off.
+        // Returning to the home page ends the browser process. Keep it while
+        // an AERA download runs, and for a short grace period so a download
+        // starting just as the page closes is seen and kept alive.
         if self.app.screen() == Screen::Home && self.aera.is_some() {
+            let since = *self.aera_home_since.get_or_insert_with(Instant::now);
             let background = self.app.state.downloads.items.iter().any(|d| {
                 d.source == skyward_ui::app::DownloadSource::Aera && d.active()
             });
-            if !background {
+            if !background && since.elapsed() >= Duration::from_secs(2) {
                 Self::aera_log("browser closed on returning home");
                 self.aera = None;
                 self.aera_frame_at = None;
+                self.aera_home_since = None;
                 self.app.state.aera.started = false;
                 self.app.state.aera.frame = None;
                 self.app.state.aera.keyboard = None;
                 self.app.refresh();
             }
+        } else {
+            self.aera_home_since = None;
         }
         let mut stream_dead = false;
         if let Some(worker) = &self.browser_stream {
