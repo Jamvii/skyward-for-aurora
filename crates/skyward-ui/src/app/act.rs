@@ -11,6 +11,10 @@ impl App {
         }
         match action {
             Action::Open(s) => {
+                if s == Screen::AeraBrowser && !self.state.data.storage_open() {
+                    self.say(l.pick(DECRYPT_FIRST), now);
+                    return Vec::new();
+                }
                 if s == Screen::Search && self.screen() == Screen::Home {
                     // The bar moves up from where it stands unfolded: a
                     // page easing there for the keys gets there at once.
@@ -422,14 +426,57 @@ impl App {
                 self.refresh();
             }
             Action::Type(cap) if self.screen() == Screen::AeraBrowser && self.state.aera.keyboard.is_some() => {
-                let value = match cap {
-                    crate::widgets::Cap::Char(ch) => ch as u32,
-                    crate::widgets::Cap::Space => 32,
-                    crate::widgets::Cap::Backspace => 8,
-                    crate::widgets::Cap::Enter => 13,
-                    _ => return Vec::new(),
-                };
-                return vec![Effect::AeraKey { value }];
+                let t = self.theme();
+                let keyboard_top = (t.m.h as f32 - crate::widgets::keyboard_height(&t)).floor() as u32;
+                let sheet_top = (t.m.h as f32 - crate::widgets::keyboard_height(&t) - t.m.dp(80.0)).max(0.0) as u32;
+                let address = self.state.aera.address_open;
+                match cap {
+                    crate::widgets::Cap::Shift => {
+                        self.state.layer = if self.state.layer == Layer::Shifted { Layer::Letters } else { Layer::Shifted };
+                        self.refresh_rows(keyboard_top, t.m.h);
+                    }
+                    crate::widgets::Cap::Show(layer) => {
+                        self.state.layer = layer;
+                        self.refresh_rows(keyboard_top, t.m.h);
+                    }
+                    crate::widgets::Cap::Char(ch) => {
+                        let shifted = self.state.layer == Layer::Shifted;
+                        if shifted {
+                            self.state.layer = Layer::Letters;
+                        }
+                        if address {
+                            self.state.aera.address.push(if shifted { ch.to_ascii_uppercase() } else { ch });
+                            self.refresh_rows(sheet_top, t.m.h);
+                        } else {
+                            let value = if shifted { ch.to_ascii_uppercase() as u32 } else { ch as u32 };
+                            self.refresh_rows(sheet_top, t.m.h);
+                            return vec![Effect::AeraKey { value }];
+                        }
+                    }
+                    crate::widgets::Cap::Space => {
+                        if address {
+                            self.state.aera.address.push(' ');
+                            self.refresh_rows(sheet_top, t.m.h);
+                        } else {
+                            return vec![Effect::AeraKey { value: 32 }];
+                        }
+                    }
+                    crate::widgets::Cap::Backspace => {
+                        if address {
+                            self.state.aera.address.pop();
+                            self.refresh_rows(sheet_top, t.m.h);
+                        } else {
+                            return vec![Effect::AeraKey { value: 8 }];
+                        }
+                    }
+                    crate::widgets::Cap::Enter => {
+                        if address {
+                            return self.act(Action::AeraOpen, now);
+                        }
+                        return vec![Effect::AeraKey { value: 13 }];
+                    }
+                }
+                return Vec::new();
             }
             Action::Type(cap) if self.screen() == Screen::Terminal => return self.term_typed(cap),
             Action::Type(cap) if self.screen() == Screen::Editor => self.edit_typed(cap),

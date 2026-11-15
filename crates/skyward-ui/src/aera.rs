@@ -264,9 +264,14 @@ fn draw_frame(c: &mut Canvas, frame: &[u8], area: Rect) {
     let data = unsafe {
         std::slice::from_raw_parts_mut(c.data.as_mut_ptr().cast::<u32>(), c.data.len() / 4)
     };
+    let held = c.held();
     for dy in 0..dh {
+        let py = y0 + dy;
+        if !held.contains(&(py as u32)) {
+            continue;
+        }
         let src = ymap[dy] * 1080 * 4;
-        let dst_row = (y0 + dy) * cw;
+        let dst_row = py * cw;
         for dx in 0..dw {
             let s = src + xmap[dx] * 4;
             let r = u32::from(frame[s + 2]);
