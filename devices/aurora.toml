@@ -20,7 +20,7 @@ density = 560
 sources = ["vendor_boot", "vendor_dlkm", "vendor", "system_dlkm"]
 # The touchscreen: Synaptics TouchComm over SPI behind Xiaomi's touch
 # layer, the one touch driver the phone's own modules.load lists.
-load = ["synaptics_tcm2", "nxp-nci"]
+load = ["synaptics_tcm2", "nxp-nci", "msm_kgsl"]
 
 # As on the 17 Ultra, no init script of the phone's starts touch_report:
 # the touch feature service turns the controller's raw frames into
@@ -118,7 +118,7 @@ groups = ["root"]
 
 [[service]]
 path = "/system/bin/sh"
-args = ["-c", "chmod 666 /dev/nq-nci 2>/dev/null || true; V=$(ls -d /system_dlkm/lib/modules/*/kernel/net/rfkill 2>/dev/null | head -1); T=/system_dlkm/flatten/lib/modules/rfkill.ko; if [ -n \"$V\" ] && [ -f \"$V/rfkill.ko\" ] && [ -f \"$T\" ]; then mount --bind \"$V/rfkill.ko\" \"$T\" 2>/dev/null || true; fi"]
+args = ["-c", "chmod 666 /dev/nq-nci 2>/dev/null || true"]
 oneshot = true
 user = "root"
 groups = ["root"]
@@ -133,3 +133,41 @@ groups = ["root"]
 # The credential service of the older kind refuses everything while it
 # looks for the secure processing unit the recovery does not carry; the
 # phone's own recovery turns that search off before starting it.
+
+# Show the OTG drive inside the file manager: /usb is the same folders as
+# the drive the recovery mounts at /mnt/usb, so copying between the two
+# trees is the file manager's ordinary copy and paste.
+[[service]]
+path = "/system/bin/sh"
+args = ["-c", "ln -sfn /mnt/usb /usb"]
+oneshot = true
+user = "root"
+groups = ["root"]
+
+# The GPU comes up without the display stack only after msm_kgsl is loaded;
+# AERA's WPE worker needs its render node writable by the isolated uid.
+[[service]]
+path = "/system/bin/sh"
+args = ["-c", "chmod 666 /dev/kgsl-3d0 /dev/dma_heap/system 2>/dev/null || true"]
+oneshot = true
+user = "root"
+groups = ["root"]
+
+# Loading msm_kgsl through the module loader is not guaranteed on every
+# recovery build; make the render node exist for AERA either way.
+[[service]]
+path = "/system/bin/sh"
+args = ["-c", "insmod /vendor_dlkm/lib/modules/msm_kgsl.ko 2>/dev/null || true"]
+oneshot = true
+user = "root"
+groups = ["root"]
+
+# AERA renders through zink/Turnip/KGSL. Prefer a stable high GPU floor and
+# turn off preemption/IFPC, whose power-collapse fences show up as repeated
+# "CP: AHB bus error" on this recovery kernel.
+[[service]]
+path = "/system/bin/sh"
+args = ["-c", "K=/sys/class/kgsl/kgsl-3d0; echo 0 > $K/min_pwrlevel 2>/dev/null || true; echo performance > $K/devfreq/governor 2>/dev/null || true; echo 0 > $K/preemption 2>/dev/null || true; echo 0 > $K/bus_split 2>/dev/null || true; echo 0 > $K/ifpc 2>/dev/null || true"]
+oneshot = true
+user = "root"
+groups = ["root"]

@@ -360,7 +360,7 @@ fn in_place(place: Place, path: &str) -> PathBuf {
 /// what update_engine wrote while it last installed an update and what the
 /// last install script wrote, and the kernel's. Each file is owned as a
 /// copy into the folder would be. Gives the folder.
-fn export_logs(recovery: bool, kernel: bool, into: &Path, zone: usize) -> Result<PathBuf> {
+fn export_logs(recovery: bool, kernel: bool, browser: bool, full: bool, into: &Path, zone: usize) -> Result<PathBuf> {
     let there = into.ancestors().find(|p| p.exists()).context("the root is always there")?;
     let ownership = ownership(there)?;
     let folder = into.join(skyward_ui::fmt::stamp(unix_now()?, zone));
@@ -383,6 +383,20 @@ fn export_logs(recovery: bool, kernel: bool, into: &Path, zone: usize) -> Result
     }
     if kernel {
         save("kernel.log", skyward_sys::kernel_log()?.as_bytes())?;
+    }
+    if browser {
+        match fs::read(crate::logs::BASIC) {
+            Ok(log) => save("browser.log", &log)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e).with_context(|| format!("read {}", crate::logs::BASIC)),
+        }
+    }
+    if full {
+        match fs::read(crate::logs::FULL) {
+            Ok(log) => save("chromium.log", &log)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e).with_context(|| format!("read {}", crate::logs::FULL)),
+        }
     }
     Ok(folder)
 }
@@ -1091,6 +1105,10 @@ fn job_end(end: filework::End) -> JobEnd {
 pub fn run(cfg: &DeviceConfig, programs: &[Service], font: &Path, mono: &Path, request: bcb::Request, start: Screen, dump: Option<&Path>) -> Result<()> {
     let mut pages = Pages::open(cfg, programs, font, mono, request, start, dump)?;
     pages.begin()?;
+    if let Some(logs) = crate::logs::Continuous::resume() {
+        pages.app.state.logs_continuous = true;
+        pages.logs = Some(logs);
+    }
     // The phone sleeps while its screen is off and nothing needs it awake.
     let sleeper = Sleeper::start()?;
     // A uevent may be a charger or a computer attached or taken away: the
@@ -1209,6 +1227,12 @@ struct Pages<'a> {
     browser: Option<crate::browser::Worker>,
     /// The full browser's continuous frame stream.
     browser_stream: Option<crate::browser::Worker>,
+    /// The logs copied continuously into one file, when that is on.
+    logs: Option<crate::logs::Continuous>,
+    /// The AERA WPE worker, when its page is open.
+    aera: Option<skyward_aera::Process>,
+    /// A copy into the USB drive has it writable until the copy ends.
+    usb_writable: bool,
     /// The WLAN, on a phone whose driver the recovery brings up.
     wlan: Option<wlan::Worker>,
     scanned_at: Instant,
@@ -1421,6 +1445,9 @@ impl<'a> Pages<'a> {
             servers: Arc::new(Mutex::new(Vec::new())),
             browser: None,
             browser_stream: None,
+            logs: None,
+            aera: None,
+            usb_writable: false,
             wlan: None,
             scanned_at: Instant::now(),
             checker: None,
@@ -2032,6 +2059,12 @@ impl Pages<'_> {
         }
         if worked {
             self.worker = None;
+            if self.usb_writable {
+                self.usb_writable = false;
+                if let Err(e) = skyward_block::mount::remount_writable(Path::new(USB_DRIVE), false) {
+                    skyward_sys::kmsg(&format!("the USB drive stays writable: {e:#}"))?;
+                }
+            }
             let folder = self.app.state.files.path.clone();
             list(&mut self.app, folder)?;
         }
@@ -2335,8 +2368,79 @@ impl Pages<'_> {
         Ok(())
     }
 
+/// Unpack the AERA runtime beside the worker when it is not there yet.
+fn ensure_aera_runtime() -> Result<()> {
+    let runtime = Path::new("/tmp/aera-web");
+    if runtime.join("usr/bin/aera-browser-worker").is_file() {
+        return Ok(());
+    }
+    let archive = Path::new("/sdcard/aera-runtime.tar.gz");
+    if !archive.is_file() {
+        anyhow::bail!("put aera-runtime.tar.gz in internal storage, or unpack it to /tmp/aera-web");
+    }
+    if runtime.exists() {
+        std::fs::remove_dir_all(runtime).with_context(|| format!("clear {}", runtime.display()))?;
+    }
+    std::fs::create_dir_all(runtime).with_context(|| format!("make {}", runtime.display()))?;
+    let status = std::process::Command::new("/system/bin/tar")
+        .args(["-xzf"])
+        .arg(archive)
+        .arg("-C")
+        .arg(runtime)
+        .status()
+        .with_context(|| "run tar for the AERA runtime")?;
+    anyhow::ensure!(status.success(), "tar could not unpack the AERA runtime");
+    Ok(())
+}
+
+/// Take any AERA frame the worker published, acknowledge it, and keep
+/// the page's status in step.
+    fn aera_told(&mut self) -> Result<()> {
+        let Some(process) = &mut self.aera else { return Ok(()) };
+        if !process.running() {
+            self.aera = None;
+            self.app.state.aera.failed = Some("the AERA worker ended".into());
+            return Ok(());
+        }
+        let changed = process.session().poll();
+        let mut redraw = changed;
+        if changed {
+            if let Some(frame) = process.session().frame() {
+                self.app.state.aera.frame = Some(frame.to_vec());
+            }
+            process.session().acknowledge();
+        }
+        let session = process.session();
+        let status = session.status().to_string();
+        let back = session.can_back();
+        let forward = session.can_forward();
+        if self.app.state.aera.status != status {
+            self.app.state.aera.status = status;
+            redraw = true;
+        }
+        if self.app.state.aera.can_back != back || self.app.state.aera.can_forward != forward {
+            self.app.state.aera.can_back = back;
+            self.app.state.aera.can_forward = forward;
+            redraw = true;
+        }
+        let keyboard = match session.keyboard() {
+            skyward_aera::Keyboard::Show(purpose) => Some(purpose),
+            skyward_aera::Keyboard::Hide | skyward_aera::Keyboard::None => None,
+        };
+        if keyboard != self.app.state.aera.keyboard {
+            skyward_sys::kmsg(&format!("AERA keyboard {keyboard:?}"))?;
+            self.app.state.aera.keyboard = keyboard;
+            redraw = true;
+        }
+        if redraw {
+            self.app.refresh();
+        }
+        Ok(())
+    }
+
     /// How opening the data partition, or a user's own files in it, ended.
     fn decrypt_told(&mut self, now: u64) -> Result<()> {
+        self.aera_told()?;
         let mut stream_dead = false;
         if let Some(worker) = &self.browser_stream {
             for ev in worker.events() {
@@ -2386,6 +2490,12 @@ impl Pages<'_> {
         }
         if browser_done {
             self.browser = None;
+        }
+        if self.logs.is_none() && self.app.state.data.storage_open()
+            && let Some(logs) = crate::logs::Continuous::resume()
+        {
+            self.app.state.logs_continuous = true;
+            self.logs = Some(logs);
         }
 
         let Some(ended) = self.decryptor.as_ref().and_then(Decryptor::ended) else { return Ok(()) };
@@ -2661,6 +2771,83 @@ impl Pages<'_> {
                     worker.stop();
                 }
             }
+            Effect::AeraStart { url } => {
+                let mut started_now = false;
+                if self.aera.is_none() {
+                    match Self::ensure_aera_runtime() {
+                        Ok(()) => match skyward_aera::Process::start(Path::new("/tmp/aera-web")) {
+                            Ok(process) => {
+                                self.app.state.aera.failed = None;
+                                self.app.state.aera.started = true;
+                                self.aera = Some(process);
+                                started_now = true;
+                            }
+                            Err(e) => {
+                                self.app.state.aera.started = false;
+                                self.app.state.aera.failed = Some(format!("{e:#}"));
+                                self.app.state.aera.status = "AERA runtime is not available".into();
+                            }
+                        },
+                        Err(e) => {
+                            self.app.state.aera.started = false;
+                            self.app.state.aera.failed = Some(format!("{e:#}"));
+                            self.app.state.aera.status = "AERA runtime is not available".into();
+                        }
+                    }
+                }
+                if started_now {
+                    if let Some(process) = &mut self.aera {
+                        if !process.session().open(&url) {
+                            self.app.state.aera.failed = Some(process.session().status().to_string());
+                        }
+                    }
+                }
+            }
+            Effect::AeraOpen { url } => {
+                if let Some(process) = &mut self.aera {
+                    if !process.session().open(&url) {
+                        self.app.state.aera.failed = Some(process.session().status().to_string());
+                    }
+                }
+            }
+            Effect::AeraBack => {
+                if let Some(process) = &mut self.aera {
+                    process.session().back();
+                }
+            }
+            Effect::AeraForward => {
+                if let Some(process) = &mut self.aera {
+                    process.session().forward();
+                }
+            }
+            Effect::AeraReload => {
+                if let Some(process) = &mut self.aera {
+                    process.session().reload();
+                }
+            }
+            Effect::AeraTap { x, y } => {
+                if let Some(process) = &mut self.aera {
+                    skyward_sys::kmsg(&format!("AERA tap {x},{y}"))?;
+                    process.session().touch(skyward_aera::Kind::TouchDown, i32::from(x), i32::from(y));
+                    process.session().touch(skyward_aera::Kind::TouchUp, i32::from(x), i32::from(y));
+                }
+            }
+            Effect::AeraTouch { kind, x, y } => {
+                if let Some(process) = &mut self.aera {
+                    let kind = match kind {
+                        skyward_ui::app::AeraTouchKind::Down => skyward_aera::Kind::TouchDown,
+                        skyward_ui::app::AeraTouchKind::Move => skyward_aera::Kind::TouchMove,
+                        skyward_ui::app::AeraTouchKind::Up => skyward_aera::Kind::TouchUp,
+                    };
+                    process.session().touch(kind, i32::from(x), i32::from(y));
+                }
+            }
+            Effect::AeraKey { value } => {
+                if let Some(process) = &mut self.aera {
+                    skyward_sys::kmsg(&format!("AERA key {value}"))?;
+                    process.session().send(skyward_aera::Kind::Key, 0, 0, value, "");
+                }
+            }
             Effect::BrowserPluginInstall { archive, dir } => {
                 if let Some(worker) = self.browser.take() {
                     worker.stop();
@@ -2841,12 +3028,27 @@ impl Pages<'_> {
             Effect::StopSkywardUpdate => self.skyward_updater.as_ref().context("Skyward is not being updated")?.stop(),
             // Logs that cannot be saved are the page's to report;
             // the recovery carries on.
-            Effect::ExportLogs { recovery, kernel, storage } => {
+            Effect::LogsContinuous { on } => {
+                if on {
+                    if self.logs.is_none() {
+                        match crate::logs::Continuous::start() {
+                            Ok(logs) => self.logs = Some(logs),
+                            Err(e) => {
+                                self.app.state.logs_continuous = false;
+                                self.app.report(&format!("{e:#}"), now);
+                            }
+                        }
+                    }
+                } else if let Some(logs) = self.logs.take() {
+                    logs.stop();
+                }
+            }
+            Effect::ExportLogs { recovery, kernel, browser, full, storage } => {
                 let into = match storage {
                     true => Path::new(skyward_crypto::data::SDCARD).join(STORAGE_LOGS),
                     false => PathBuf::from(TMP_LOGS),
                 };
-                match export_logs(recovery, kernel, &into, self.app.state.time_zone) {
+                match export_logs(recovery, kernel, browser, full, &into, self.app.state.time_zone) {
                     Ok(folder) => self.app.report(&skyward_ui::fmt::exported(self.app.state.lang, &folder.display().to_string()), now),
                     Err(e) => self.app.report(&skyward_ui::fmt::export_failed(self.app.state.lang, &format!("{e:#}")), now),
                 }
@@ -3031,6 +3233,11 @@ impl Pages<'_> {
             }
         };
         let (from, to) = (PathBuf::from(&path), PathBuf::from(&into));
+        let usb = into == USB_DRIVE || into.starts_with(&format!("{USB_DRIVE}/")) || into == "/usb" || into.starts_with("/usb/");
+        if usb {
+            skyward_block::mount::remount_writable(Path::new(USB_DRIVE), true)?;
+            self.usb_writable = true;
+        }
         let (task, shown) = match op {
             FileOp::Copy => (filework::Task::Copy { from, into: to, clash, ownership }, FileTask::Copy { path, into }),
             FileOp::Move => (filework::Task::Move { from, into: to, clash, ownership }, FileTask::Move { path, into }),

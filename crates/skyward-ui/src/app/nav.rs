@@ -301,6 +301,13 @@ impl App {
             Screen::Files => vec![Effect::ReadDir(self.state.files.path.clone())],
             Screen::FilesOtg => vec![Effect::ReadOtg(self.state.otg.path.clone())],
             Screen::Magisk => vec![Effect::ReadMagisk],
+            // Start, or retry starting, every time the page is entered:
+            // the runtime may have been extracted after the last attempt.
+            Screen::AeraBrowser => vec![Effect::AeraStart { url: "aera://start".into() }],
+            Screen::AeraAddress => {
+                self.state.layer = Layer::Letters;
+                Vec::new()
+            }
             Screen::Choose(place) if self.state.place_open(place) => vec![Effect::ReadPlace(place, self.state.folder(s).path.clone())],
             Screen::Search => {
                 self.state.search.clear();

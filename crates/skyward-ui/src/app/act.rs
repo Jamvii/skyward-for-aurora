@@ -35,6 +35,20 @@ impl App {
                 self.settle_page();
                 self.refresh();
             }
+            Action::Back | Action::CloseSearch if self.screen() == Screen::AeraBrowser
+                && (self.state.aera.address_open || self.state.aera.panel.is_some()) =>
+            {
+                self.state.aera.address_open = false;
+                self.state.aera.panel = None;
+                self.refresh();
+                return Vec::new();
+            }
+            Action::Back | Action::CloseSearch if self.screen() == Screen::Files && self.state.files_searching => {
+                self.state.files_searching = false;
+                self.state.files_search.clear();
+                self.refresh();
+                return Vec::new();
+            }
             Action::Back | Action::CloseSearch => return self.back(now),
             Action::Theme { dark } => {
                 if self.state.dark != dark {
@@ -284,23 +298,96 @@ impl App {
                 self.state.logs[k] = !self.state.logs[k];
                 self.refresh();
             }
+            Action::LogContinuous => {
+                self.state.logs_continuous = !self.state.logs_continuous;
+                self.refresh();
+                return vec![Effect::LogsContinuous { on: self.state.logs_continuous }];
+            }
             Action::LogsTo(k) => {
                 self.state.logs_to = k;
                 self.refresh();
             }
             Action::ExportLogs => {
-                let ([recovery, kernel], storage) = (self.state.logs, self.state.logs_to == 1);
-                if !recovery && !kernel {
+                let ([recovery, kernel, browser, full], storage) = (self.state.logs, self.state.logs_to == 1);
+                if !recovery && !kernel && !browser && !full {
                     self.say(l.pick(["请选择要导出的日志", "請選擇要匯出的記錄", "Choose the logs to export"]), now);
                 } else if storage && !self.state.data.storage_open() {
                     self.say(l.pick(DECRYPT_FIRST), now);
                 } else {
-                    return vec![Effect::ExportLogs { recovery, kernel, storage }];
+                    return vec![Effect::ExportLogs { recovery, kernel, browser, full, storage }];
                 }
             }
             Action::PickSlot(slot) => {
                 self.state.next_slot = Some(slot);
                 self.refresh();
+            }
+            Action::AeraBack => return vec![Effect::AeraBack],
+            Action::AeraForward => return vec![Effect::AeraForward],
+            Action::AeraReload => return vec![Effect::AeraReload],
+            Action::AeraAddress => {
+                self.state.aera.address_open = true;
+                self.state.aera.panel = None;
+                self.state.layer = Layer::Letters;
+                self.refresh();
+            }
+            Action::AeraOpen => {
+                let input = self.state.aera.address.trim().to_string();
+                if input.is_empty() {
+                    self.say(l.pick(["请输入网址", "請輸入網址", "Type an address"]), now);
+                } else {
+                    self.state.aera.loaded = input.clone();
+                    self.state.aera.address_open = false;
+                    self.state.aera.panel = None;
+                    self.state.aera.history.push(input.clone());
+                    return vec![Effect::AeraOpen { url: input }];
+                }
+            }
+            Action::AeraTap(x, y) => return vec![Effect::AeraTap { x, y }],
+            Action::AeraKeyboardHide => {
+                self.state.aera.keyboard = None;
+                self.refresh();
+            }
+            Action::AeraPanelOpen(panel) => {
+                self.state.aera.panel = Some(panel);
+                self.state.aera.address_open = false;
+                self.refresh();
+            }
+            Action::AeraPanelClose => {
+                self.state.aera.panel = None;
+                self.refresh();
+            }
+            Action::AeraHistoryOpen(i) => {
+                if let Some(url) = self.state.aera.history.get(i).cloned() {
+                    self.state.aera.address = url.clone();
+                    self.state.aera.loaded = url.clone();
+                    self.state.aera.panel = None;
+                    return vec![Effect::AeraOpen { url }];
+                }
+            }
+            Action::AeraBookmarkOpen(i) => {
+                if let Some(url) = self.state.aera.bookmarks.get(i).cloned() {
+                    self.state.aera.address = url.clone();
+                    self.state.aera.loaded = url.clone();
+                    self.state.aera.panel = None;
+                    return vec![Effect::AeraOpen { url }];
+                }
+            }
+            Action::AeraBookmarkCurrent => {
+                let url = self.state.aera.loaded.clone();
+                if !url.is_empty() && !self.state.aera.bookmarks.contains(&url) {
+                    self.state.aera.bookmarks.push(url);
+                }
+                self.refresh();
+            }
+            Action::Type(cap) if self.screen() == Screen::AeraBrowser && self.state.aera.keyboard.is_some() => {
+                let value = match cap {
+                    crate::widgets::Cap::Char(ch) => ch as u32,
+                    crate::widgets::Cap::Space => 32,
+                    crate::widgets::Cap::Backspace => 8,
+                    crate::widgets::Cap::Enter => 13,
+                    _ => return Vec::new(),
+                };
+                return vec![Effect::AeraKey { value }];
             }
             Action::Type(cap) if self.screen() == Screen::Terminal => return self.term_typed(cap),
             Action::Type(cap) if self.screen() == Screen::Editor => self.edit_typed(cap),
@@ -328,7 +415,9 @@ impl App {
                 }
             }
             Action::ClearSearch => {
-                if self.screen() == Screen::FilesSearch {
+                if self.screen() == Screen::AeraBrowser && self.state.aera.address_open {
+                    self.state.aera.address.clear();
+                } else if self.screen() == Screen::FilesSearch || (self.screen() == Screen::Files && self.state.files_searching) {
                     self.state.files_search.clear();
                     self.refind_files();
                 } else {
@@ -379,16 +468,24 @@ impl App {
                     Ok(entries) => (0..entries.len()).collect(),
                     Err(_) => Vec::new(),
                 };
+                self.state.files_searching = true;
                 self.state.layer = Layer::Letters;
-                self.open(Screen::FilesSearch);
+                self.refresh();
             }
             Action::FilesSearchClose => {
                 self.state.files_search.clear();
-                return self.back(now);
+                self.state.files_searching = false;
+                self.refresh();
             }
             Action::OpenFound(i) => {
                 if let Some(&orig) = self.state.files_found.get(i) {
-                    self.back(now);
+                    if self.state.files_searching {
+                        self.state.files_searching = false;
+                        self.state.files_search.clear();
+                        self.refresh();
+                    } else {
+                        self.back(now);
+                    }
                     return self.act(Action::OpenEntry(orig), now);
                 }
             }
@@ -634,12 +731,15 @@ impl App {
     fn typing(&mut self) -> &mut String {
         match self.screen() {
             Screen::Search => &mut self.state.search,
+            Screen::AeraAddress => &mut self.state.aera.address,
+            Screen::AeraBrowser if self.state.aera.address_open => &mut self.state.aera.address,
             Screen::BrowserAddress => &mut self.state.browser.address,
             Screen::BrowserForm => {
                 let (form, field) = self.state.browser.field.expect("the form page has a field");
                 &mut self.state.browser.form[form][field]
             }
             Screen::FilesSearch => &mut self.state.files_search,
+            Screen::Files if self.state.files_searching => &mut self.state.files_search,
             Screen::Decrypt => &mut self.state.code,
             Screen::Rename => &mut self.state.new_name,
             Screen::WlanPassword => &mut self.state.password,
@@ -684,6 +784,13 @@ impl App {
                     if let Some(first) = search::find_on(&self.state.search, l, |screen| self.state.offers(screen)).first() {
                         return self.act(Action::Open(first.screen), now);
                     }
+                }
+                Screen::AeraAddress => {
+                    self.open(Screen::AeraBrowser);
+                    return self.act(Action::AeraOpen, now);
+                }
+                Screen::AeraBrowser if self.state.aera.address_open => {
+                    return self.act(Action::AeraOpen, now);
                 }
                 Screen::BrowserAddress => {
                     let input = self.state.browser.address.clone();
@@ -769,7 +876,7 @@ impl App {
         }
         // What is typed shows above the keyboard, which stays as it was
         // while its keys do.
-        if self.screen() == Screen::FilesSearch {
+        if self.screen() == Screen::FilesSearch || (self.screen() == Screen::Files && self.state.files_searching) {
             self.refind_files();
         }
         if matches!(cap, Cap::Char(_) | Cap::Space | Cap::Backspace) && self.state.layer == layer {

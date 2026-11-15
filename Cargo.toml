@@ -1,7 +1,9 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/aera-browser-jail",
     "crates/skyward",
+    "crates/skyward-aera",
     "crates/skyward-config",
     "crates/skyward-binder",
     "crates/skyward-backup",

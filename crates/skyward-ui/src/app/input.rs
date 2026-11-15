@@ -112,6 +112,23 @@ impl App {
                     .filter(|&(a, r)| self.frame.as_ref().is_some_and(|fr| fr.hits.contains(&Hit { rect: r, action: a })))
                     .filter(|&(a, r)| row_wide(&t, r) && !matches!(a, Action::Open(Screen::Search) | Action::Confirm(_) | Action::TypeInto(_)))
                     .map(|(_, r)| r);
+                if let Some((Action::AeraTap(..), _)) = hit {
+                    if let Some((vx, vy)) = crate::aera::view_point(&m, x, y) {
+                        self.drag = Drag::Aera { x: vx, y: vy };
+                        fx.push(Effect::AeraTouch { kind: AeraTouchKind::Down, x: vx, y: vy });
+                        return fx;
+                    }
+                }
+                if self.screen() == Screen::AeraBrowser {
+                    // Everything outside the page (bar, status, sheets) is
+                    // fixed; a drag there must not move the page.
+                    if let Some((action, _)) = hit {
+                        self.drag = Drag::Press { x, y, action: Some(action), edge: at_edge, at: now };
+                    } else {
+                        self.drag = Drag::Held;
+                    }
+                    return fx;
+                }
                 self.drag = match hit {
                     Some((Action::Slider(which), track)) => {
                         self.set_slider(&t, which, track, x);
@@ -136,6 +153,18 @@ impl App {
                 };
             }
             Touch::Move(x, y) => match std::mem::replace(&mut self.drag, Drag::Idle) {
+                Drag::Aera { x: lx, y: ly } => {
+                    if let Some((vx, vy)) = crate::aera::view_point(&m, x, y) {
+                        self.drag = Drag::Aera { x: vx, y: vy };
+                        fx.push(Effect::AeraTouch { kind: AeraTouchKind::Move, x: vx, y: vy });
+                    } else {
+                        self.drag = Drag::Aera { x: lx, y: ly };
+                    }
+                }
+                Drag::Press { .. } if self.screen() == Screen::AeraBrowser => {
+                    // No page scrolling behind the fixed browser chrome.
+                    self.drag = Drag::Held;
+                }
                 Drag::Press { x: x0, y: y0, action, edge: at_edge, at } => {
                     self.tracker.add(now, y);
                     let (dx, dy) = (x - x0, y - y0);
@@ -203,6 +232,9 @@ impl App {
                 Drag::Idle => {}
             },
             Touch::Up => match std::mem::replace(&mut self.drag, Drag::Idle) {
+                Drag::Aera { x, y } => {
+                    fx.push(Effect::AeraTouch { kind: AeraTouchKind::Up, x, y });
+                }
                 Drag::Press { action: Some(a), .. } => {
                     if let Some(p) = &mut self.row_press {
                         p.lift(now);

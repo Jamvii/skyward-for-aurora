@@ -93,13 +93,13 @@ pub fn screen(cx: &Ctx) -> Frame {
                     .trail(Trail::Switch(module.enabled && !module.removing));
                 let list = widgets::list(&mut c, t, f, y, &[row]);
                 out.extend(hits(&list.rows, &[Action::ToggleMagisk(i, !module.enabled)]));
-                y = list.bottom;
+                y = list.bottom + m.dp(8.0);
                 let row = Row::new(l.pick(["移除", "移除", "Remove"]))
                     .icon(Rgba::rgb(0xd1, 0x3a, 0x3a), Icon::Wipe)
                     .trail(Trail::None);
                 let list = widgets::list(&mut c, t, f, y, &[row]);
                 out.extend(hits(&list.rows, &[Action::RemoveMagisk(i)]));
-                y = list.bottom;
+                y = list.bottom + m.dp(16.0);
             }
         }
     }

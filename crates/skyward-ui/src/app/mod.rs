@@ -35,6 +35,7 @@ use skyward_vab::{BootSlots, Hold, Slot, SnapshotState, Standing};
 
 mod act;
 mod backup;
+mod aera;
 mod browser;
 mod decrypt;
 mod draw;
@@ -64,6 +65,14 @@ mod wipe;
 mod wlan;
 
 pub use backup::*;
+pub use aera::{Aera, AeraPanel};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AeraTouchKind {
+    Down,
+    Move,
+    Up,
+}
 pub use browser::*;
 pub use decrypt::*;
 pub use entry::*;
@@ -126,6 +135,9 @@ pub enum Screen {
     /// The web, read as text, pictures and links.
     Browser,
     BrowserAddress,
+    /// The AERA WPE browser, its frame and its own address field.
+    AeraBrowser,
+    AeraAddress,
     BrowserDownloads,
     BrowserForm,
     BrowserFull,
@@ -268,6 +280,8 @@ pub enum Action {
     /// A swipe-to-confirm track; dragging the knob to the far end confirms.
     Confirm(Confirm),
     /// The pattern grid on the unlock page.
+    /// A finger dragging the AERA page: the last view coordinate sent.
+    Aera { x: u16, y: u16 },
     Pattern,
     /// Start receiving a package over USB.
     Sideload,
@@ -300,8 +314,11 @@ pub enum Action {
     RestorePart(usize),
     /// Stop backing up, or checking a backup before it is restored.
     StopBackup,
-    /// Tick or untick a log to export: the recovery's, the kernel's.
+    /// Tick or untick a log to export: the recovery's, the kernel's, the
+    /// basic browser's, the full browser's.
     LogPart(usize),
+    /// Keep copying the logs into one file until turned off.
+    LogContinuous,
     /// Save the logs to the temporary folder, or to internal storage.
     LogsTo(usize),
     /// Save the logs ticked where they are to go.
@@ -354,6 +371,19 @@ pub enum Action {
     BrowserPluginTap(u16, u16),
     BrowserPluginPinch(f32),
     BrowserPluginText,
+    AeraBack,
+    AeraForward,
+    AeraReload,
+    AeraAddress,
+    AeraOpen,
+    AeraTap(u16, u16),
+    AeraKey(u32),
+    AeraKeyboardHide,
+    AeraPanelOpen(AeraPanel),
+    AeraPanelClose,
+    AeraHistoryOpen(usize),
+    AeraBookmarkOpen(usize),
+    AeraBookmarkCurrent,
     BrowserPluginScroll(f32),
     BrowserPluginReload,
     BrowserPluginStop,
@@ -576,6 +606,15 @@ pub enum Effect {
     BrowserPluginScroll { dy: i64 },
     BrowserPluginStop,
     BrowserPluginRemove { dir: String },
+    /// Start the AERA WPE runtime, and open `url` when it is there.
+    AeraStart { url: String },
+    AeraOpen { url: String },
+    AeraBack,
+    AeraForward,
+    AeraReload,
+    AeraTap { x: u16, y: u16 },
+    AeraTouch { kind: AeraTouchKind, x: u16, y: u16 },
+    AeraKey { value: u32 },
     /// List the folder at this path from the top of a place, to choose a
     /// file to install in, telling what it holds with [`App::set_place`].
     ReadPlace(Place, String),
@@ -653,7 +692,9 @@ pub enum Effect {
     /// Save the logs chosen, the recovery's own and the kernel's, into a
     /// folder of their own in internal storage or the temporary folder,
     /// saying where with [`App::report`].
-    ExportLogs { recovery: bool, kernel: bool, storage: bool },
+    ExportLogs { recovery: bool, kernel: bool, browser: bool, full: bool, storage: bool },
+    /// Start or stop copying the logs continuously into one file.
+    LogsContinuous { on: bool },
     /// Back up the parts ticked, by their place in [`BACKUP_PARTS`], into
     /// a folder of their own in `place`, telling how it goes with
     /// [`App::backup_started`], [`App::backup_plan`], [`App::backup_at`]
@@ -718,6 +759,8 @@ enum Drag {
     /// Scrolling a terminal's screen back through what the shell wrote, or
     /// the editor's text, `carry` being the part of a row not yet scrolled.
     History { last: f32, carry: f32, pitch: f32 },
+    /// A finger dragging the AERA page: the last view coordinate sent.
+    Aera { x: u16, y: u16 },
     Pattern,
     /// A finger that landed just after the panel lit; nothing it does
     /// counts until it lifts.

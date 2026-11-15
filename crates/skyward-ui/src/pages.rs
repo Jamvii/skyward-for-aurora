@@ -86,6 +86,8 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::Magisk => crate::magisk::screen(cx),
         Screen::Browser => crate::browser::screen(cx),
         Screen::BrowserAddress => crate::browser::address(cx),
+        Screen::AeraBrowser => crate::aera::browser(cx),
+        Screen::AeraAddress => crate::aera::address(cx),
         Screen::BrowserDownloads => crate::browser::downloads(cx),
         Screen::BrowserForm => crate::browser::form(cx),
         Screen::BrowserFull => crate::browser::full(cx),
@@ -284,8 +286,8 @@ pub fn home(cx: &Ctx) -> Frame {
         rows.push(Row::new(l.pick(WLAN)).icon(BLUE, Icon::Wlan).trail(Trail::Value(fmt::wlan_value(l, cx.state.wlan.as_ref().expect("checked")))));
         opens.push(Action::Open(Screen::Wlan));
     }
-    rows.push(Row::new(l.pick(["浏览器", "瀏覽器", "Browser"])).icon(BLUE, Icon::Globe).trail(Trail::Arrow));
-    opens.push(Action::Open(Screen::Browser));
+    rows.push(Row::new(l.pick(["AERA 浏览器", "AERA 瀏覽器", "AERA Browser"])).icon(BLUE, Icon::Globe).trail(Trail::Arrow));
+    opens.push(Action::Open(Screen::AeraBrowser));
     let starts = systems_value(cx);
     if cx.state.offers(Screen::Systems) {
         let row = Row::new(l.pick(DUAL_BOOT)).icon(PURPLE, Icon::Systems);
@@ -1768,7 +1770,7 @@ pub fn wipe(cx: &Ctx) -> Frame {
 
 /// A page laid out above the on-screen keyboard: where the keyboard's top
 /// is, and its keys as touch targets.
-fn keyboard_hits(c: &mut Canvas, t: &Theme, f: &Fonts, s: &State, enter: &str, out: &mut Vec<Hit>) -> f32 {
+pub(crate) fn keyboard_hits(c: &mut Canvas, t: &Theme, f: &Fonts, s: &State, enter: &str, out: &mut Vec<Hit>) -> f32 {
     let top = t.m.h as f32 - widgets::keyboard_height(t);
     let keys = widgets::keyboard(c, t, f, s.lang, top, s.layer, s.key_held(), enter);
     out.extend(keys.into_iter().map(|(rect, cap)| Hit { rect, action: Action::Type(cap) }));
@@ -2219,8 +2221,6 @@ pub fn advanced(cx: &Ctx) -> Frame {
     let tools = widgets::list(&mut c, t, f, top, &[
         Row::new(l.pick(FILES)).icon(BLUE, Icon::Folder),
         Row::new("Magisk").icon(GREEN, Icon::Shield),
-        Row::new(l.pick(["OTG 文件", "OTG 檔案", "OTG files"])).icon(ORANGE, Icon::Usb),
-        Row::new(l.pick(["浏览器", "瀏覽器", "Browser"])).icon(BLUE, Icon::Globe),
         Row::new(l.pick(TERMINAL)).icon(SLATE, Icon::Terminal),
         Row::new(l.pick(RELABEL)).icon(PURPLE, Icon::Shield),
         Row::new(l.pick(FILESYSTEMS)).icon(RED, Icon::Mount),
@@ -2230,8 +2230,6 @@ pub fn advanced(cx: &Ctx) -> Frame {
     let out = hits(&tools.rows, &[
         Action::Open(Screen::Files),
         Action::Open(Screen::Magisk),
-        Action::FilesOtg,
-        Action::Open(Screen::Browser),
         Action::Open(Screen::Terminal),
         Action::Open(Screen::Relabel),
         Action::Open(Screen::Filesystems),
@@ -3106,6 +3104,9 @@ pub fn wlan_network(cx: &Ctx) -> Frame {
 pub fn files(cx: &Ctx) -> Frame {
     let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
     let m = &t.m;
+    if s.files_searching {
+        return files_search(cx);
+    }
     // An entry picked to copy or move goes to the folder shown, from the
     // bar held at the bottom.
     let dock = s.clip.as_ref().map(|clip| {
@@ -3122,9 +3123,19 @@ pub fn files(cx: &Ctx) -> Frame {
     frame.dock = dock;
     frame.button = button;
     if s.files.entries.is_ok() {
-        let bar = Rect::new(m.margin, frame.content_top - m.dp(52.0), m.w as f32 - m.margin * 2.0, m.dp(44.0));
-        frame.fold = Some(Fold { bar, hint: l.pick(["搜索当前文件夹", "搜尋目前資料夾", "Search this folder"]), span: m.dp(52.0) });
+        let delta = m.search_h + m.dp(12.0);
+        let bar = Rect::new(m.margin, frame.content_top, m.w as f32 - m.margin * 2.0, m.search_h);
+        frame.fold = Some(Fold { bar, hint: l.pick(["搜索当前文件夹", "搜尋目前資料夾", "Search this folder"]), span: delta });
         frame.hits.push(Hit { rect: bar, action: Action::FilesSearch });
+        frame.content_top += delta;
+        if let Some(pinned) = &mut frame.pinned {
+            pinned.top += delta;
+        }
+        if let Some(rows) = &mut frame.rows {
+            for edge in &mut rows.edges {
+                *edge += delta;
+            }
+        }
     }
     frame
 }
@@ -3557,7 +3568,7 @@ pub fn time_zone(cx: &Ctx) -> Frame {
 /// Saving the logs, as a bug report asks for them.
 pub fn logs(cx: &Ctx) -> Frame {
     let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
-    let mut c = page(cx);
+    let mut c = long_page(cx);
     let mut out = Vec::new();
     let top = t.m.content_top;
     let y = widgets::section_first(&mut c, t, f, top, l.pick(["日志内容", "記錄內容", "Logs"]));
@@ -3568,9 +3579,27 @@ pub fn logs(cx: &Ctx) -> Frame {
         Row::new(l.pick(["内核日志", "核心記錄", "Kernel log"]))
             .subtitle(l.pick(["本次开机以来的内核消息", "本次開機以來的核心訊息", "The kernel's messages since this start"]))
             .trail(Trail::Check(s.logs[1])),
+        Row::new(l.pick(["基本模式浏览器日志", "基本模式瀏覽器記錄", "Browser log (basic)"]))
+            .subtitle(l.pick(["网页读取、地址和下载", "網頁讀取、地址和下載", "Pages read, addresses and downloads"]))
+            .trail(Trail::Check(s.logs[2])),
+        Row::new(l.pick(["完整模式浏览器日志", "完整模式瀏覽器記錄", "Browser log (full)"]))
+            .subtitle(l.pick(["Chromium 插件的启动和页面日志", "Chromium 外掛的啟動和頁面記錄", "The Chromium plugin's startup and pages"]))
+            .trail(Trail::Check(s.logs[3])),
     ]);
-    out.extend(hits(&parts.rows, &[Action::LogPart(0), Action::LogPart(1)]));
-    let y = widgets::section(&mut c, t, f, parts.bottom, l.pick(["保存到", "儲存到", "Save to"]));
+    out.extend(hits(&parts.rows, &[Action::LogPart(0), Action::LogPart(1), Action::LogPart(2), Action::LogPart(3)]));
+    let y = widgets::section(&mut c, t, f, parts.bottom, l.pick(["持续模式", "持續模式", "Continuous mode"]));
+    let continuous = widgets::list(&mut c, t, f, y, &[
+        Row::new(l.pick(["持续写入同一文件", "持續寫入同一檔案", "Keep writing to one file"]))
+            .subtitle(l.pick(["/sdcard/Skyward/logs/continuous.log，浏览器崩溃或 Recovery 重载后仍保留", "/sdcard/Skyward/logs/continuous.log，瀏覽器崩潰或 Recovery 重載後仍保留", "/sdcard/Skyward/logs/continuous.log, kept through a browser crash or a recovery reload"]))
+            .trail(Trail::Switch(s.logs_continuous)),
+    ]);
+    out.extend(hits(&continuous.rows, &[Action::LogContinuous]));
+    let y = widgets::footnote(&mut c, t, f, continuous.bottom, l.pick([
+        "开启后每半秒追加一次；关闭后停止。文件只追加，不覆盖。",
+        "開啟後每半秒追加一次；關閉後停止。檔案只追加，不覆蓋。",
+        "Appends every half second while on, and stops when off. The file is only appended to.",
+    ]));
+    let y = widgets::section(&mut c, t, f, y, l.pick(["保存到", "儲存到", "Save to"]));
     let storage = l.pick(match cx.state.data.storage_open() {
         true => ["Skyward/logs 文件夹", "Skyward/logs 資料夾", "The Skyward/logs folder"],
         false => DECRYPT_NEEDED,
@@ -3590,7 +3619,7 @@ pub fn logs(cx: &Ctx) -> Frame {
     let y = widgets::footnote(&mut c, t, f, places.bottom, note);
     let export = widgets::button(&mut c, t, f, y + t.m.dp(24.0), l.pick(["导出", "匯出", "Export"]));
     out.push(Hit { rect: export, action: Action::ExportLogs });
-    Frame::new(t, c, out, l.pick(LOGS), top)
+    Frame::new(t, fit(c, t, export.y + export.h), out, l.pick(LOGS), top)
 }
 
 /// Skyward's licence, in Chinese, ahead of the words the licence gives for

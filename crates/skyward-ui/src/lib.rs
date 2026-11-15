@@ -15,6 +15,7 @@ pub mod icons;
 pub mod lang;
 pub mod magisk;
 pub mod motion;
+pub mod aera;
 pub mod pages;
 pub mod search;
 pub mod settings;
