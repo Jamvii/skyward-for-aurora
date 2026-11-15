@@ -385,19 +385,15 @@ fn export_logs(recovery: bool, kernel: bool, browser: bool, full: bool, into: &P
         save("kernel.log", skyward_sys::kernel_log()?.as_bytes())?;
     }
     if browser {
-        match fs::read(crate::logs::BASIC) {
-            Ok(log) => save("browser.log", &log)?,
+        match fs::read(crate::logs::AERA) {
+            Ok(log) => save("aera.log", &log)?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e).with_context(|| format!("read {}", crate::logs::BASIC)),
+            Err(e) => return Err(e).with_context(|| format!("read {}", crate::logs::AERA)),
         }
     }
-    if full {
-        match fs::read(crate::logs::FULL) {
-            Ok(log) => save("chromium.log", &log)?,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e).with_context(|| format!("read {}", crate::logs::FULL)),
-        }
-    }
+    // `full` is kept in the effect for the settings format, but the old
+    // Chromium log is no longer exported.
+    let _ = full;
     Ok(folder)
 }
 
@@ -2368,6 +2364,18 @@ impl Pages<'_> {
         Ok(())
     }
 
+/// Append one line to the AERA browser's exportable log.
+fn aera_log(line: &str) {
+    let path = Path::new(crate::logs::AERA);
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "[{stamp}] {line}");
+    }
+}
+
 /// Unpack the AERA runtime beside the worker when it is not there yet.
 fn ensure_aera_runtime() -> Result<()> {
     let runtime = Path::new("/tmp/aera-web");
@@ -2415,6 +2423,9 @@ fn ensure_aera_runtime() -> Result<()> {
         let back = session.can_back();
         let forward = session.can_forward();
         if self.app.state.aera.status != status {
+            if !status.is_empty() {
+                Self::aera_log(&format!("status: {status}"));
+            }
             self.app.state.aera.status = status;
             redraw = true;
         }
@@ -2777,12 +2788,14 @@ impl Pages<'_> {
                     match Self::ensure_aera_runtime() {
                         Ok(()) => match skyward_aera::Process::start(Path::new("/tmp/aera-web")) {
                             Ok(process) => {
+                                Self::aera_log("AERA worker started");
                                 self.app.state.aera.failed = None;
                                 self.app.state.aera.started = true;
                                 self.aera = Some(process);
                                 started_now = true;
                             }
                             Err(e) => {
+                                Self::aera_log(&format!("AERA worker failed: {e:#}"));
                                 self.app.state.aera.started = false;
                                 self.app.state.aera.failed = Some(format!("{e:#}"));
                                 self.app.state.aera.status = "AERA runtime is not available".into();
@@ -2804,6 +2817,7 @@ impl Pages<'_> {
                 }
             }
             Effect::AeraOpen { url } => {
+                Self::aera_log(&format!("open {url}"));
                 if let Some(process) = &mut self.aera {
                     if !process.session().open(&url) {
                         self.app.state.aera.failed = Some(process.session().status().to_string());
@@ -2811,16 +2825,19 @@ impl Pages<'_> {
                 }
             }
             Effect::AeraBack => {
+                Self::aera_log("back");
                 if let Some(process) = &mut self.aera {
                     process.session().back();
                 }
             }
             Effect::AeraForward => {
+                Self::aera_log("forward");
                 if let Some(process) = &mut self.aera {
                     process.session().forward();
                 }
             }
             Effect::AeraReload => {
+                Self::aera_log("reload");
                 if let Some(process) = &mut self.aera {
                     process.session().reload();
                 }
@@ -2828,6 +2845,7 @@ impl Pages<'_> {
             Effect::AeraTap { x, y } => {
                 if let Some(process) = &mut self.aera {
                     skyward_sys::kmsg(&format!("AERA tap {x},{y}"))?;
+                    Self::aera_log(&format!("tap {x},{y}"));
                     process.session().touch(skyward_aera::Kind::TouchDown, i32::from(x), i32::from(y));
                     process.session().touch(skyward_aera::Kind::TouchUp, i32::from(x), i32::from(y));
                 }
@@ -2845,6 +2863,7 @@ impl Pages<'_> {
             Effect::AeraKey { value } => {
                 if let Some(process) = &mut self.aera {
                     skyward_sys::kmsg(&format!("AERA key {value}"))?;
+                    Self::aera_log(&format!("key {value}"));
                     process.session().send(skyward_aera::Kind::Key, 0, 0, value, "");
                 }
             }

@@ -3579,14 +3579,11 @@ pub fn logs(cx: &Ctx) -> Frame {
         Row::new(l.pick(["内核日志", "核心記錄", "Kernel log"]))
             .subtitle(l.pick(["本次开机以来的内核消息", "本次開機以來的核心訊息", "The kernel's messages since this start"]))
             .trail(Trail::Check(s.logs[1])),
-        Row::new(l.pick(["基本模式浏览器日志", "基本模式瀏覽器記錄", "Browser log (basic)"]))
-            .subtitle(l.pick(["网页读取、地址和下载", "網頁讀取、地址和下載", "Pages read, addresses and downloads"]))
+        Row::new(l.pick(["AERA 浏览器日志", "AERA 瀏覽器記錄", "AERA browser log"]))
+            .subtitle(l.pick(["地址、触摸、键盘和 AERA 运行状态", "網址、觸控、鍵盤和 AERA 執行狀態", "Addresses, touches, keyboard and AERA status"]))
             .trail(Trail::Check(s.logs[2])),
-        Row::new(l.pick(["完整模式浏览器日志", "完整模式瀏覽器記錄", "Browser log (full)"]))
-            .subtitle(l.pick(["Chromium 插件的启动和页面日志", "Chromium 外掛的啟動和頁面記錄", "The Chromium plugin's startup and pages"]))
-            .trail(Trail::Check(s.logs[3])),
     ]);
-    out.extend(hits(&parts.rows, &[Action::LogPart(0), Action::LogPart(1), Action::LogPart(2), Action::LogPart(3)]));
+    out.extend(hits(&parts.rows, &[Action::LogPart(0), Action::LogPart(1), Action::LogPart(2)]));
     let y = widgets::section(&mut c, t, f, parts.bottom, l.pick(["持续模式", "持續模式", "Continuous mode"]));
     let continuous = widgets::list(&mut c, t, f, y, &[
         Row::new(l.pick(["持续写入同一文件", "持續寫入同一檔案", "Keep writing to one file"]))

@@ -72,8 +72,7 @@ pub struct State {
     pub restore: Option<(BackupEntry, [bool; 4])>,
     /// Backing up or restoring under way, or how it last ended.
     pub backup_job: Option<BackupJob>,
-    /// Which logs to export: the recovery's, the kernel's, the basic
-    /// browser's and the full browser's.
+    /// Which logs to export: the recovery's, the kernel's, and AERA's.
     pub logs: [bool; 4],
     /// Where the logs go: 0 for the temporary folder, 1 for internal
     /// storage.
