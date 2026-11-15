@@ -2386,10 +2386,18 @@ fn aera_log(line: &str) {
 /// Unpack the AERA runtime beside the worker when it is not there yet.
 fn ensure_aera_runtime() -> Result<()> {
     let runtime = Path::new("/tmp/aera-web");
-    if runtime.join("usr/bin/aera-browser-worker").is_file() {
+    let worker = runtime.join("usr/bin/aera-browser-worker");
+    let archive = Path::new("/sdcard/aera-runtime.tar.gz");
+    let marker = Path::new("/skyward/run/aera-runtime.size");
+    let marked = archive.metadata().ok().map(|m| m.len()).is_some_and(|len| {
+        fs::read_to_string(marker).ok().and_then(|s| s.trim().parse::<u64>().ok()) == Some(len)
+    });
+    if worker.is_file() && marked {
+        // The unpacked runtime matches the tar's size.
         return Ok(());
     }
-    let archive = Path::new("/sdcard/aera-runtime.tar.gz");
+    // A missing or stale size marker means this worker is from an older
+    // runtime; unpack the current tar.
     if !archive.is_file() {
         anyhow::bail!("put aera-runtime.tar.gz in internal storage, or unpack it to /tmp/aera-web");
     }
@@ -2405,6 +2413,10 @@ fn ensure_aera_runtime() -> Result<()> {
         .status()
         .with_context(|| "run tar for the AERA runtime")?;
     anyhow::ensure!(status.success(), "tar could not unpack the AERA runtime");
+    if let Ok(meta) = archive.metadata() {
+        let _ = fs::create_dir_all("/skyward/run");
+        let _ = fs::write(marker, meta.len().to_string());
+    }
     Ok(())
 }
 
