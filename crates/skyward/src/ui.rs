@@ -1227,6 +1227,9 @@ struct Pages<'a> {
     logs: Option<crate::logs::Continuous>,
     /// The AERA WPE worker, when its page is open.
     aera: Option<skyward_aera::Process>,
+    /// When the last AERA frame was copied for the UI; frames arriving
+    /// faster than the page can be scaled are dropped.
+    aera_frame_at: Option<Instant>,
     /// A copy into the USB drive has it writable until the copy ends.
     usb_writable: bool,
     /// The WLAN, on a phone whose driver the recovery brings up.
@@ -1443,6 +1446,7 @@ impl<'a> Pages<'a> {
             browser_stream: None,
             logs: None,
             aera: None,
+            aera_frame_at: None,
             usb_writable: false,
             wlan: None,
             scanned_at: Instant::now(),
@@ -2411,11 +2415,21 @@ fn ensure_aera_runtime() -> Result<()> {
             return Ok(());
         }
         let changed = process.session().poll();
-        let mut redraw = changed;
+        let mut redraw = false;
         if changed {
-            if let Some(frame) = process.session().frame() {
-                self.app.state.aera.frame = Some(frame.to_vec());
+            let now_at = Instant::now();
+            let due = self
+                .aera_frame_at
+                .is_none_or(|last| now_at.duration_since(last) >= Duration::from_millis(33));
+            if due {
+                if let Some(frame) = process.session().frame() {
+                    self.app.state.aera.frame = Some(frame.to_vec());
+                    self.aera_frame_at = Some(now_at);
+                    redraw = true;
+                }
             }
+            // Always acknowledge: the worker may publish the newest frame
+            // instead of waiting for a slow 1080x2100 rescale.
             process.session().acknowledge();
         }
         let session = process.session();

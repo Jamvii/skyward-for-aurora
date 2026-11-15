@@ -238,20 +238,26 @@ fn draw_frame(c: &mut Canvas, frame: &[u8], area: Rect) {
         return;
     }
     let shown = frame_rect(area);
+    let dw = shown.w as usize;
+    let dh = shown.h as usize;
+    if dw == 0 || dh == 0 {
+        return;
+    }
     let cw = c.w as usize;
-    for dy in 0..shown.h as usize {
-        let sy = ((dy as f32 / shown.h) * 2100.0) as usize;
-        let py = (shown.y as usize + dy).min(c.h as usize - 1);
-        for dx in 0..shown.w as usize {
-            let sx = ((dx as f32 / shown.w) * 1080.0) as usize;
-            let px = (shown.x as usize + dx).min(cw - 1);
-            let src = (sy.min(2099) * 1080 + sx.min(1079)) * 4;
-            let dst = (py * cw + px) * 4;
-            // Little-endian B,G,R,A from the worker.
-            c.data[dst] = frame[src + 2];
-            c.data[dst + 1] = frame[src + 1];
-            c.data[dst + 2] = frame[src];
-            c.data[dst + 3] = 255;
+    let xmap: Vec<usize> = (0..dw).map(|dx| dx * 1080 / dw).collect();
+    let ymap: Vec<usize> = (0..dh).map(|dy| dy * 2100 / dh).collect();
+    let x0 = shown.x as usize;
+    let y0 = shown.y as usize;
+    for dy in 0..dh {
+        let src = ymap[dy] * 1080 * 4;
+        let dst_row = (y0 + dy) * cw * 4;
+        for dx in 0..dw {
+            let s = src + xmap[dx] * 4;
+            let d = dst_row + (x0 + dx) * 4;
+            c.data[d] = frame[s + 2];
+            c.data[d + 1] = frame[s + 1];
+            c.data[d + 2] = frame[s];
+            c.data[d + 3] = 255;
         }
     }
 }
