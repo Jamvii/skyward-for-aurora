@@ -343,6 +343,45 @@ impl App {
                 }
             }
             Action::AeraTap(x, y) => return vec![Effect::AeraTap { x, y }],
+            Action::OpenDownloads => self.open(Screen::Downloads),
+            Action::OpenDownloadLink => {
+                self.state.downloads.error = None;
+                self.state.layer = Layer::Letters;
+                self.open(Screen::DownloadLink);
+            }
+            Action::DownloadBegin => {
+                let url = self.state.downloads.address.trim().to_string();
+                if !(url.starts_with("http://") || url.starts_with("https://")) {
+                    self.state.downloads.error = Some(l.pick(["只支持 http:// 或 https://", "只支援 http:// 或 https://", "Only http:// or https://"]).into());
+                } else {
+                    let name = download_name(&url);
+                    let path = format!("/sdcard/AERA/Downloads/{name}");
+                    let id = self.state.downloads.next_custom_id();
+                    self.state.downloads.add_custom(id, &url, &name, &path);
+                    self.state.downloads.error = None;
+                    self.open(Screen::Downloads);
+                    return vec![Effect::DownloadStart { id, url, name, path }];
+                }
+            }
+            Action::DownloadCancel(id) => {
+                let Some(item) = self.state.downloads.find(id) else { return Vec::new() };
+                let source = item.source;
+                return vec![Effect::DownloadStop { id, source }];
+            }
+            Action::DownloadRetry(id) => {
+                let Some(item) = self.state.downloads.find(id).cloned() else { return Vec::new() };
+                if item.source == DownloadSource::Custom {
+                    if let Some(d) = self.state.downloads.find(id) {
+                        d.done = 0;
+                        d.state = DownloadState::Downloading;
+                    }
+                    return vec![Effect::DownloadStart { id, url: item.url, name: item.name, path: item.path }];
+                }
+            }
+            Action::DownloadClear => {
+                self.state.downloads.items.retain(|d| d.active());
+                self.refresh();
+            }
             Action::AeraKeyboardHide => {
                 self.state.aera.keyboard = None;
                 self.refresh();
@@ -415,7 +454,9 @@ impl App {
                 }
             }
             Action::ClearSearch => {
-                if self.screen() == Screen::AeraBrowser && self.state.aera.address_open {
+                if self.screen() == Screen::DownloadLink {
+                    self.state.downloads.address.clear();
+                } else if self.screen() == Screen::AeraBrowser && self.state.aera.address_open {
                     self.state.aera.address.clear();
                 } else if self.screen() == Screen::FilesSearch || (self.screen() == Screen::Files && self.state.files_searching) {
                     self.state.files_search.clear();
@@ -469,12 +510,16 @@ impl App {
                     Err(_) => Vec::new(),
                 };
                 self.state.files_searching = true;
+                self.state.files_search_at = Some(now);
+                self.state.files_search_anim = 0.0;
                 self.state.layer = Layer::Letters;
                 self.refresh();
             }
             Action::FilesSearchClose => {
                 self.state.files_search.clear();
                 self.state.files_searching = false;
+                self.state.files_search_at = None;
+                self.state.files_search_anim = 1.0;
                 self.refresh();
             }
             Action::OpenFound(i) => {
@@ -732,6 +777,7 @@ impl App {
         match self.screen() {
             Screen::Search => &mut self.state.search,
             Screen::AeraAddress => &mut self.state.aera.address,
+            Screen::DownloadLink => &mut self.state.downloads.address,
             Screen::AeraBrowser if self.state.aera.address_open => &mut self.state.aera.address,
             Screen::BrowserAddress => &mut self.state.browser.address,
             Screen::BrowserForm => {
@@ -792,6 +838,7 @@ impl App {
                 Screen::AeraBrowser if self.state.aera.address_open => {
                     return self.act(Action::AeraOpen, now);
                 }
+                Screen::DownloadLink => return self.act(Action::DownloadBegin, now),
                 Screen::BrowserAddress => {
                     let input = self.state.browser.address.clone();
                     self.open(Screen::Browser);
@@ -1092,4 +1139,19 @@ mod tests {
         assert_eq!(app.state.held, None);
         assert_eq!(app.state.search, "q");
     }
+}
+
+/// A safe file name from a download URL.
+pub fn download_name(url: &str) -> String {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    let raw = path.rsplit('/').find(|part| !part.is_empty()).unwrap_or("download");
+    let mut name: String = raw
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '_' })
+        .collect();
+    if name.is_empty() || name == "." || name == ".." {
+        name = "download".into();
+    }
+    name.truncate(120);
+    name
 }

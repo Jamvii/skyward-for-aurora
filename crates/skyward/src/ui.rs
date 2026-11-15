@@ -1225,6 +1225,8 @@ struct Pages<'a> {
     browser_stream: Option<crate::browser::Worker>,
     /// The logs copied continuously into one file, when that is on.
     logs: Option<crate::logs::Continuous>,
+    /// Custom-link downloads, each on its own browser worker.
+    download_jobs: Vec<(u64, crate::browser::Worker)>,
     /// The AERA WPE worker, when its page is open.
     aera: Option<skyward_aera::Process>,
     /// When the last AERA frame was copied for the UI; frames arriving
@@ -1445,6 +1447,7 @@ impl<'a> Pages<'a> {
             browser: None,
             browser_stream: None,
             logs: None,
+            download_jobs: Vec::new(),
             aera: None,
             aera_frame_at: None,
             usb_writable: false,
@@ -2433,6 +2436,21 @@ fn ensure_aera_runtime() -> Result<()> {
             process.session().acknowledge();
         }
         let session = process.session();
+        let downloads = session.take_downloads();
+        for d in downloads {
+            let event = match d.event {
+                skyward_aera::DownloadEvent::Started => skyward_ui::app::DownloadEventKind::Started,
+                skyward_aera::DownloadEvent::Progress => skyward_ui::app::DownloadEventKind::Progress,
+                skyward_aera::DownloadEvent::Finished => skyward_ui::app::DownloadEventKind::Finished,
+                skyward_aera::DownloadEvent::Failed(_) => skyward_ui::app::DownloadEventKind::Failed,
+                skyward_aera::DownloadEvent::Cancelled => skyward_ui::app::DownloadEventKind::Cancelled,
+            };
+            let error = match d.event {
+                skyward_aera::DownloadEvent::Failed(why) => Some(why),
+                _ => None,
+            };
+            self.app.aera_download(d.id, event, &d.name, d.done, d.total, error);
+        }
         let status = session.status().to_string();
         let back = session.can_back();
         let forward = session.can_forward();
@@ -2463,9 +2481,30 @@ fn ensure_aera_runtime() -> Result<()> {
         Ok(())
     }
 
+    /// What the independent manager's custom-link workers reported.
+    fn downloads_told(&mut self) {
+        let mut finished = Vec::new();
+        for (id, worker) in &self.download_jobs {
+            for ev in worker.events() {
+                match ev {
+                    crate::browser::Event::Saved(saving) => {
+                        self.app.manager_download_progress(*id, saving.done, saving.total);
+                    }
+                    crate::browser::Event::Ended(ended) => {
+                        self.app.manager_download_ended(*id, ended);
+                        finished.push(*id);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        self.download_jobs.retain(|(id, _)| !finished.contains(id));
+    }
+
     /// How opening the data partition, or a user's own files in it, ended.
     fn decrypt_told(&mut self, now: u64) -> Result<()> {
         self.aera_told()?;
+        self.downloads_told();
         let mut stream_dead = false;
         if let Some(worker) = &self.browser_stream {
             for ev in worker.events() {
@@ -2881,6 +2920,36 @@ impl Pages<'_> {
                     process.session().send(skyward_aera::Kind::Key, 0, 0, value, "");
                 }
             }
+            Effect::DownloadStart { id, url, name, path } => {
+                let made = Path::new(&path)
+                    .parent()
+                    .is_none_or(|parent| std::fs::create_dir_all(parent).is_ok());
+                if !made {
+                    self.app.manager_download_ended(id, Err(format!("cannot make the download folder for {name}")));
+                } else {
+                    match crate::browser::Worker::start(
+                        crate::browser::Task::Save { url, path: PathBuf::from(path) },
+                        self.servers.clone(),
+                    ) {
+                        Ok(worker) => self.download_jobs.push((id, worker)),
+                        Err(e) => self.app.manager_download_ended(id, Err(format!("{e:#}"))),
+                    }
+                }
+            }
+            Effect::DownloadStop { id, source } => match source {
+                skyward_ui::app::DownloadSource::Aera => {
+                    if let Some(process) = &mut self.aera {
+                        process.session().cancel_download(id);
+                    }
+                }
+                skyward_ui::app::DownloadSource::Custom => {
+                    if let Some(pos) = self.download_jobs.iter().position(|(job, _)| *job == id) {
+                        let (_, worker) = self.download_jobs.remove(pos);
+                        worker.stop();
+                        self.app.manager_download_ended(id, Err("stopped as asked".into()));
+                    }
+                }
+            },
             Effect::BrowserPluginInstall { archive, dir } => {
                 if let Some(worker) = self.browser.take() {
                     worker.stop();

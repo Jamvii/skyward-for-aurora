@@ -2,6 +2,7 @@ pub mod app;
 pub mod browser;
 pub mod canvas;
 pub mod charge;
+pub mod downloads;
 pub mod color;
 pub mod editor;
 pub mod files;

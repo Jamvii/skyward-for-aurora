@@ -7,11 +7,13 @@ use crate::color::Rgba;
 use crate::geom::Rect;
 use crate::icons::{self, Icon};
 use crate::pages::Ctx;
-use crate::widgets;
+use crate::widgets::{self, Row, Trail};
 
 const BLACK: Rgba = Rgba::rgb(0, 0, 0);
 const WHITE: Rgba = Rgba::rgb(255, 255, 255);
 const INK: Rgba = Rgba::rgb(24, 26, 30);
+const BLUE: Rgba = Rgba::rgb(47, 128, 232);
+const GREEN: Rgba = Rgba::rgb(26, 158, 85);
 
 /// The browser page: the worker's frame under a compact bottom toolbar.
 pub fn browser(cx: &Ctx) -> Frame {
@@ -117,45 +119,52 @@ pub fn browser(cx: &Ctx) -> Frame {
         out.push(Hit { rect: close, action: Action::AeraKeyboardHide });
     }
 
-    // History, bookmarks and downloads open over the page.
+    // History, bookmarks and downloads open as a Skyward-style sheet.
     if let Some(panel) = s.aera.panel {
-        let top = h - m.dp(360.0);
-        c.fill_round_rect(0.0, top, w, h - top, m.dp(22.0), t.pal.card);
+        let top = h - m.dp(420.0);
+        c.fill_round_rect(0.0, top, w, h - top, m.dp(24.0), t.pal.card);
         let title = match panel {
-            AeraPanel::History => "历史",
-            AeraPanel::Bookmarks => "书签",
-            AeraPanel::Downloads => "下载",
+            AeraPanel::History => l.pick(["历史记录", "歷史記錄", "History"]),
+            AeraPanel::Bookmarks => l.pick(["书签", "書籤", "Bookmarks"]),
+            AeraPanel::Downloads => l.pick(["下载", "下載", "Downloads"]),
         };
-        c.text(&f.value, title, m.margin, top + m.dp(30.0), m.dp(20.0), t.pal.text, Some(w - m.margin * 2.0));
+        c.text(&f.value, title, m.margin, top + m.dp(30.0), m.dp(22.0), t.pal.text, Some(w - m.margin * 2.0));
         c.text_center(&f.value, "x", w - m.margin, top + m.dp(24.0), m.dp(20.0), t.pal.text);
         out.push(Hit { rect: Rect::new(w - m.margin - m.dp(32.0), top, m.dp(32.0), m.dp(48.0)), action: Action::AeraPanelClose });
         match panel {
             AeraPanel::History | AeraPanel::Bookmarks => {
                 let entries: Vec<(usize, String)> = if panel == AeraPanel::History {
-                    s.aera.history.iter().enumerate().rev().take(8).map(|(i, u)| (i, u.clone())).collect()
+                    s.aera.history.iter().enumerate().rev().take(6).map(|(i, u)| (i, u.clone())).collect()
                 } else {
-                    s.aera.bookmarks.iter().enumerate().rev().take(8).map(|(i, u)| (i, u.clone())).collect()
+                    s.aera.bookmarks.iter().enumerate().rev().take(6).map(|(i, u)| (i, u.clone())).collect()
                 };
                 if entries.is_empty() {
-                    c.text(&f.value, "暂无记录", m.margin, top + m.dp(70.0), m.dp(14.0), t.pal.subtitle, None);
-                }
-                for (k, (index, url)) in entries.into_iter().enumerate() {
-                    let y = top + m.dp(58.0 + 34.0 * k as f32);
-                    c.text(&f.value, &url, m.margin, y + m.dp(20.0), m.dp(13.0), t.pal.text, Some(w - m.margin * 2.0));
-                    out.push(Hit {
-                        rect: Rect::new(m.margin, y, w - m.margin * 2.0, m.dp(32.0)),
-                        action: if panel == AeraPanel::History { Action::AeraHistoryOpen(index) } else { Action::AeraBookmarkOpen(index) },
-                    });
+                    c.text(&f.value, l.pick(["暂无记录", "暫無記錄", "Nothing here yet"]), m.margin, top + m.dp(74.0), m.dp(14.0), t.pal.subtitle, None);
+                } else {
+                    let rows: Vec<Row> = entries.iter().map(|(_, url)| {
+                        Row::new(url)
+                            .icon(BLUE, if panel == AeraPanel::History { Icon::Clock } else { Icon::Backup })
+                            .trail(Trail::Arrow)
+                    }).collect();
+                    let list = widgets::list(&mut c, t, f, top + m.dp(58.0), &rows);
+                    for (k, (index, _)) in entries.iter().enumerate() {
+                        let action = if panel == AeraPanel::History { Action::AeraHistoryOpen(*index) } else { Action::AeraBookmarkOpen(*index) };
+                        out.push(Hit { rect: list.rows[k], action });
+                    }
                 }
                 if panel == AeraPanel::Bookmarks {
-                    let add = Rect::new(m.margin, top + m.dp(320.0), w - m.margin * 2.0, m.dp(34.0));
-                    c.fill_round_rect(add.x, add.y, add.w, add.h, add.h / 2.0, t.pal.bg);
-                    c.text_center(&f.value, "收藏当前页面", add.x + add.w / 2.0, add.y + add.h / 2.0, m.dp(14.0), t.pal.text);
-                    out.push(Hit { rect: add, action: Action::AeraBookmarkCurrent });
+                    let add = widgets::list(&mut c, t, f, top + m.dp(354.0), &[
+                        Row::new(l.pick(["收藏当前页面", "收藏目前頁面", "Bookmark this page"])).icon(GREEN, Icon::Backup).trail(Trail::None)
+                    ]);
+                    out.push(Hit { rect: add.rows[0], action: Action::AeraBookmarkCurrent });
                 }
             }
             AeraPanel::Downloads => {
-                c.text(&f.value, "下载保存到 /sdcard/AERA/Downloads", m.margin, top + m.dp(70.0), m.dp(14.0), t.pal.subtitle, None);
+                c.text(&f.value, l.pick(["浏览器下载保存到 /sdcard/AERA/Downloads", "瀏覽器下載儲存到 /sdcard/AERA/Downloads", "Browser downloads go to /sdcard/AERA/Downloads"]), m.margin, top + m.dp(70.0), m.dp(14.0), t.pal.subtitle, Some(w - m.margin * 2.0));
+                let open = Rect::new(m.margin, top + m.dp(112.0), w - m.margin * 2.0, m.dp(46.0));
+                c.fill_round_rect(open.x, open.y, open.w, open.h, open.h / 2.0, t.pal.bg);
+                c.text_center(&f.value, l.pick(["打开下载管理器", "開啟下載管理員", "Open Download manager"]), open.x + open.w / 2.0, open.y + open.h / 2.0, m.dp(16.0), t.pal.text);
+                out.push(Hit { rect: open, action: Action::OpenDownloads });
             }
         }
     }

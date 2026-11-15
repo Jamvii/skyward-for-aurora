@@ -16,6 +16,24 @@ pub enum Keyboard {
     Hide,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DownloadEvent {
+    Started,
+    Progress,
+    Finished,
+    Failed(String),
+    Cancelled,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DownloadMessage {
+    pub id: u64,
+    pub event: DownloadEvent,
+    pub name: String,
+    pub done: u64,
+    pub total: Option<u64>,
+}
+
 pub struct Session {
     shared: *mut u8,
     shared_len: usize,
@@ -29,6 +47,7 @@ pub struct Session {
     zoom: u32,
     keyboard: Keyboard,
     failed: Option<String>,
+    downloads: Vec<DownloadMessage>,
 }
 
 impl Session {
@@ -91,6 +110,7 @@ impl Session {
             zoom: 100,
             keyboard: Keyboard::None,
             failed: None,
+            downloads: Vec::new(),
         })
     }
 
@@ -124,6 +144,18 @@ impl Session {
 
     pub fn take_keyboard(&mut self) -> Keyboard {
         std::mem::take(&mut self.keyboard)
+    }
+
+    /// Download events the worker has reported since the last call.
+    pub fn take_downloads(&mut self) -> Vec<DownloadMessage> {
+        std::mem::take(&mut self.downloads)
+    }
+
+    /// Cancel one worker download by the id it announced.
+    pub fn cancel_download(&mut self, id: u64) -> bool {
+        let mut message = Message::new(Kind::DownloadCancel, id as u32);
+        message.sequence = id as u32;
+        self.write(&message)
     }
 
     pub fn frame(&self) -> Option<&[u8]> {
@@ -265,6 +297,26 @@ impl Session {
                 }
                 Some(Kind::KeyboardShow) => self.keyboard = Keyboard::Show(message.value),
                 Some(Kind::KeyboardHide) => self.keyboard = Keyboard::Hide,
+                Some(kind @ (Kind::DownloadStarted | Kind::DownloadProgress | Kind::DownloadFinished
+                    | Kind::DownloadFailed | Kind::DownloadCancelled)) => {
+                    let total = (message.y > 0).then_some(message.y as u64 * 1024);
+                    let done = message.value as u64 * 1024;
+                    let event = match kind {
+                        Kind::DownloadStarted => DownloadEvent::Started,
+                        Kind::DownloadProgress => DownloadEvent::Progress,
+                        Kind::DownloadFinished => DownloadEvent::Finished,
+                        Kind::DownloadFailed => DownloadEvent::Failed(message.text()),
+                        Kind::DownloadCancelled => DownloadEvent::Cancelled,
+                        _ => unreachable!(),
+                    };
+                    self.downloads.push(DownloadMessage {
+                        id: message.sequence as u64,
+                        event,
+                        name: message.text(),
+                        done,
+                        total,
+                    });
+                }
                 Some(_) => {}
                 None => {}
             }

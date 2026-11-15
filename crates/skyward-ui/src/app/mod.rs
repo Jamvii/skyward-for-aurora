@@ -38,6 +38,7 @@ mod backup;
 mod aera;
 mod browser;
 mod decrypt;
+mod downloads;
 mod draw;
 mod entry;
 mod filesystem;
@@ -66,6 +67,10 @@ mod wlan;
 
 pub use backup::*;
 pub use aera::{Aera, AeraPanel};
+pub use downloads::{DownloadSource, DownloadState, ManagerDownload, ManagerDownloads};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DownloadEventKind { Started, Progress, Finished, Failed, Cancelled }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AeraTouchKind {
@@ -139,6 +144,10 @@ pub enum Screen {
     AeraBrowser,
     AeraAddress,
     BrowserDownloads,
+    /// The independent download manager.
+    Downloads,
+    /// A link to download, typed on the screen's keyboard.
+    DownloadLink,
     BrowserForm,
     BrowserFull,
     BrowserTabs,
@@ -384,6 +393,12 @@ pub enum Action {
     AeraHistoryOpen(usize),
     AeraBookmarkOpen(usize),
     AeraBookmarkCurrent,
+    OpenDownloads,
+    OpenDownloadLink,
+    DownloadBegin,
+    DownloadCancel(u64),
+    DownloadRetry(u64),
+    DownloadClear,
     BrowserPluginScroll(f32),
     BrowserPluginReload,
     BrowserPluginStop,
@@ -614,6 +629,10 @@ pub enum Effect {
     AeraReload,
     AeraTap { x: u16, y: u16 },
     AeraTouch { kind: AeraTouchKind, x: u16, y: u16 },
+    /// Start a custom download into the manager.
+    DownloadStart { id: u64, url: String, name: String, path: String },
+    /// Stop one manager download.
+    DownloadStop { id: u64, source: DownloadSource },
     AeraKey { value: u32 },
     /// List the folder at this path from the top of a place, to choose a
     /// file to install in, telling what it holds with [`App::set_place`].
@@ -1459,6 +1478,7 @@ impl App {
                 || self.title.moving(now)
                 || self.bar.moving(now)
                 || self.morph.is_some()
+                || self.state.files_search_at.is_some()
                 || self.turn.is_some()
                 || self.row_press.is_some_and(|p| p.changing(now) || p.gone(now))
                 || self.glowing());
@@ -1508,6 +1528,14 @@ impl App {
     /// deadline goes away.
     pub fn tick(&mut self, now: u64) -> Vec<Effect> {
         let mut fx = Vec::new();
+        if let Some(at) = self.state.files_search_at {
+            let progress = ((now.saturating_sub(at) as f32) / 220.0).min(1.0);
+            self.state.files_search_anim = progress;
+            if progress >= 1.0 {
+                self.state.files_search_at = None;
+            }
+            self.dirty = true;
+        }
         // The key waiting for its partner in a screenshot, left alone long
         // enough, does what it does alone.
         if self.chord.is_some_and(|(_, at)| now >= at + CHORD_MS) {

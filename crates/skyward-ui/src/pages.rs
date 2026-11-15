@@ -87,6 +87,8 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::Browser => crate::browser::screen(cx),
         Screen::BrowserAddress => crate::browser::address(cx),
         Screen::AeraBrowser => crate::aera::browser(cx),
+        Screen::Downloads => crate::downloads::manager(cx),
+        Screen::DownloadLink => crate::downloads::link(cx),
         Screen::AeraAddress => crate::aera::address(cx),
         Screen::BrowserDownloads => crate::browser::downloads(cx),
         Screen::BrowserForm => crate::browser::form(cx),
@@ -1771,7 +1773,11 @@ pub fn wipe(cx: &Ctx) -> Frame {
 /// A page laid out above the on-screen keyboard: where the keyboard's top
 /// is, and its keys as touch targets.
 pub(crate) fn keyboard_hits(c: &mut Canvas, t: &Theme, f: &Fonts, s: &State, enter: &str, out: &mut Vec<Hit>) -> f32 {
-    let top = t.m.h as f32 - widgets::keyboard_height(t);
+    keyboard_hits_at(c, t, f, s, t.m.h as f32 - widgets::keyboard_height(t), enter, out)
+}
+
+/// The keyboard at `top`, for a page that slides it up from the bottom.
+pub(crate) fn keyboard_hits_at(c: &mut Canvas, t: &Theme, f: &Fonts, s: &State, top: f32, enter: &str, out: &mut Vec<Hit>) -> f32 {
     let keys = widgets::keyboard(c, t, f, s.lang, top, s.layer, s.key_held(), enter);
     out.extend(keys.into_iter().map(|(rect, cap)| Hit { rect, action: Action::Type(cap) }));
     top
@@ -2221,6 +2227,7 @@ pub fn advanced(cx: &Ctx) -> Frame {
     let tools = widgets::list(&mut c, t, f, top, &[
         Row::new(l.pick(FILES)).icon(BLUE, Icon::Folder),
         Row::new("Magisk").icon(GREEN, Icon::Shield),
+        Row::new(l.pick(["下载管理", "下載管理", "Downloads"])).icon(GREEN, Icon::Install),
         Row::new(l.pick(TERMINAL)).icon(SLATE, Icon::Terminal),
         Row::new(l.pick(RELABEL)).icon(PURPLE, Icon::Shield),
         Row::new(l.pick(FILESYSTEMS)).icon(RED, Icon::Mount),
@@ -2230,6 +2237,7 @@ pub fn advanced(cx: &Ctx) -> Frame {
     let out = hits(&tools.rows, &[
         Action::Open(Screen::Files),
         Action::Open(Screen::Magisk),
+        Action::Open(Screen::Downloads),
         Action::Open(Screen::Terminal),
         Action::Open(Screen::Relabel),
         Action::Open(Screen::Filesystems),
@@ -3152,8 +3160,10 @@ pub fn files_search(cx: &Ctx) -> Frame {
     let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
     let m = &t.m;
     let mut c = page(cx);
+    let q = s.files_search_anim.clamp(0.0, 1.0);
     let (at, cancel) = widgets::search_layout(t);
-    let field = widgets::search_field(&mut c, t, f, at.x, at.w, at.y + at.h / 2.0, &s.files_search, l.pick(["搜索当前文件夹", "搜尋目前資料夾", "Search this folder"]));
+    let field_y = m.content_top + (at.y - m.content_top) * q;
+    let field = widgets::search_field(&mut c, t, f, at.x, at.w, field_y + at.h / 2.0, &s.files_search, l.pick(["搜索当前文件夹", "搜尋目前資料夾", "Search this folder"]));
     widgets::cancel_button(&mut c, t, cancel);
     let mut out = vec![Hit { rect: cancel, action: Action::FilesSearchClose }];
     let top = field.field.y + field.field.h + m.dp(12.0);
@@ -3177,7 +3187,8 @@ pub fn files_search(cx: &Ctx) -> Frame {
             out.extend(list.rows.iter().enumerate().map(|(i, &r)| Hit { rect: r, action: Action::OpenFound(i) }));
         }
     }
-    keyboard_hits(&mut c, t, f, s, l.pick(["搜索", "搜尋", "Search"]), &mut out);
+    let keys_top = m.h as f32 - widgets::keyboard_height(t) * q;
+    keyboard_hits_at(&mut c, t, f, s, keys_top, l.pick(["搜索", "搜尋", "Search"]), &mut out);
     if let Some(rect) = field.clear {
         out.push(Hit { rect, action: Action::ClearSearch });
     }

@@ -119,11 +119,16 @@ pub struct State {
     pub files_search: String,
     /// Whether the file manager's search field is open over it.
     pub files_searching: bool,
+    /// When the search field started coming up, and how far it has come.
+    pub files_search_at: Option<u64>,
+    pub files_search_anim: f32,
     pub files_found: Vec<usize>,
     /// Magisk, KernelSU or APatch and its modules.
     pub magisk: crate::magisk::Magisk,
     /// The browser's pages and what it is doing.
     pub browser: super::Browser,
+    /// The independent download manager.
+    pub downloads: super::ManagerDownloads,
     /// The AERA WPE browser.
     pub aera: super::Aera,
     /// The folder of internal storage a file to install is chosen in, its
@@ -254,9 +259,12 @@ impl Default for State {
             files: Folder::new("/"),
             files_search: String::new(),
             files_searching: false,
+            files_search_at: None,
+            files_search_anim: 1.0,
             files_found: Vec::new(),
             magisk: crate::magisk::Magisk::default(),
             browser: super::Browser::default(),
+            downloads: super::ManagerDownloads::default(),
             aera: super::Aera::default(),
             storage: Folder::new(""),
             usb_drive: None,
