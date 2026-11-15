@@ -248,16 +248,19 @@ fn draw_frame(c: &mut Canvas, frame: &[u8], area: Rect) {
     let ymap: Vec<usize> = (0..dh).map(|dy| dy * 2100 / dh).collect();
     let x0 = shown.x as usize;
     let y0 = shown.y as usize;
+    // One 32-bit RGBA store per pixel instead of four byte stores.
+    let data = unsafe {
+        std::slice::from_raw_parts_mut(c.data.as_mut_ptr().cast::<u32>(), c.data.len() / 4)
+    };
     for dy in 0..dh {
         let src = ymap[dy] * 1080 * 4;
-        let dst_row = (y0 + dy) * cw * 4;
+        let dst_row = (y0 + dy) * cw;
         for dx in 0..dw {
             let s = src + xmap[dx] * 4;
-            let d = dst_row + (x0 + dx) * 4;
-            c.data[d] = frame[s + 2];
-            c.data[d + 1] = frame[s + 1];
-            c.data[d + 2] = frame[s];
-            c.data[d + 3] = 255;
+            let r = u32::from(frame[s + 2]);
+            let g = u32::from(frame[s + 1]);
+            let b = u32::from(frame[s]);
+            data[dst_row + x0 + dx] = r | (g << 8) | (b << 16) | 0xff00_0000;
         }
     }
 }

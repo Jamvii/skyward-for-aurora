@@ -167,7 +167,7 @@ groups = ["root"]
 # "CP: AHB bus error" on this recovery kernel.
 [[service]]
 path = "/system/bin/sh"
-args = ["-c", "K=/sys/class/kgsl/kgsl-3d0; echo 0 > $K/min_pwrlevel 2>/dev/null || true; echo performance > $K/devfreq/governor 2>/dev/null || true; echo 0 > $K/preemption 2>/dev/null || true; echo 0 > $K/bus_split 2>/dev/null || true; echo 0 > $K/ifpc 2>/dev/null || true"]
+args = ["-c", "K=/sys/class/kgsl/kgsl-3d0; echo 0 > $K/min_pwrlevel 2>/dev/null || true; echo performance > $K/devfreq/governor 2>/dev/null || true; echo 0 > $K/preemption 2>/dev/null || true; echo 0 > $K/bus_split 2>/dev/null || true; echo 0 > $K/ifpc 2>/dev/null || true; for P in /sys/devices/system/cpu/cpufreq/policy*; do echo performance > $P/scaling_governor 2>/dev/null || true; done"]
 oneshot = true
 user = "root"
 groups = ["root"]
