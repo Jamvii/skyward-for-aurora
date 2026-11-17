@@ -3263,6 +3263,7 @@ pub fn row(screen: Screen, cx: &Ctx, i: usize, c: &mut Canvas) {
             let entries = folder.entries.as_ref().expect("a folder listed draws its rows");
             files::row(c, cx.t, cx.f, cx.state.lang, &entries[i], folder.listed, cx.state.time_zone);
         }
+        Screen::Browser => crate::browser::row(cx, i, c),
         Screen::Installing => widgets::output_row(c, cx.t, cx.f, &cx.state.script_output, i),
         Screen::PartWork => {
             let work = cx.state.part_work.as_ref().expect("the page of partition work shows work");
