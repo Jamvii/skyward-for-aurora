@@ -379,7 +379,7 @@ impl App {
             }
             Action::DownloadRetry(id) => {
                 let Some(item) = self.state.downloads.find(id).cloned() else { return Vec::new() };
-                if item.source == DownloadSource::Custom {
+                if matches!(item.source, DownloadSource::Custom | DownloadSource::Basic) {
                     if let Some(d) = self.state.downloads.find(id) {
                         d.done = 0;
                         d.state = DownloadState::Downloading;

@@ -209,7 +209,7 @@ impl App {
                 self.state.browser.close_tab(i);
                 self.refresh();
             }
-            Action::BrowserDownloads => self.open(Screen::BrowserDownloads),
+            Action::BrowserDownloads => self.open(Screen::Downloads),
             Action::BrowserLink(i) => {
                 if let Some(url) = self.state.browser.page().and_then(|p| p.blocks.get(i)).and_then(|b| match b {
                     skyward_net::web::Block::Link { url, .. } => Some(url.clone()),
@@ -455,18 +455,11 @@ impl App {
 
     fn browser_download(&mut self, url: String, name: String, _now: u64) -> Vec<Effect> {
         let path = format!("/sdcard/Download/Skyward/{name}");
-        self.state.browser.downloads.push(BrowserDownload {
-            name: name.clone(),
-            url: url.clone(),
-            path: path.clone(),
-            size: None,
-            done: 0,
-            state: BrowserSave::Downloading { done: 0, total: None },
-        });
-        self.state.browser.saving = Some(self.state.browser.downloads.len() - 1);
-        self.open(Screen::BrowserDownloads);
+        let id = self.state.downloads.next_basic_id();
+        self.state.downloads.add_basic(id, &url, &name, &path);
+        self.open(Screen::Downloads);
         self.refresh();
-        vec![Effect::BrowserDownload { url, name, path }]
+        vec![Effect::DownloadStart { id, url, name, path }]
     }
 
     pub fn browser_opened(&mut self, opened: Result<skyward_net::web::Opened, String>) {

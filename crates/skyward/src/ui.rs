@@ -3054,7 +3054,8 @@ impl Pages<'_> {
                         process.session().cancel_download(id);
                     }
                 }
-                skyward_ui::app::DownloadSource::Custom => {
+                skyward_ui::app::DownloadSource::Basic
+                | skyward_ui::app::DownloadSource::Custom => {
                     if let Some(pos) = self.download_jobs.iter().position(|(job, _)| *job == id) {
                         let (_, worker) = self.download_jobs.remove(pos);
                         worker.stop();

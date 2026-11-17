@@ -6,6 +6,7 @@ use super::*;
 /// Where a download came from, which decides how it is stopped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DownloadSource {
+    Basic,
     Aera,
     Custom,
 }
@@ -47,11 +48,12 @@ pub struct ManagerDownloads {
     pub address: String,
     pub error: Option<String>,
     next_custom: u64,
+    next_basic: u64,
 }
 
 impl Default for ManagerDownloads {
     fn default() -> Self {
-        Self { items: Vec::new(), address: String::new(), error: None, next_custom: 1_000_000 }
+        Self { items: Vec::new(), address: String::new(), error: None, next_custom: 1_000_000, next_basic: 2_000_000 }
     }
 }
 
@@ -60,6 +62,25 @@ impl ManagerDownloads {
         let id = self.next_custom;
         self.next_custom += 1;
         id
+    }
+
+    pub fn next_basic_id(&mut self) -> u64 {
+        let id = self.next_basic;
+        self.next_basic += 1;
+        id
+    }
+
+    pub fn add_basic(&mut self, id: u64, url: &str, name: &str, path: &str) {
+        self.items.push(ManagerDownload {
+            id,
+            source: DownloadSource::Basic,
+            name: name.into(),
+            url: url.into(),
+            path: path.into(),
+            done: 0,
+            total: None,
+            state: DownloadState::Downloading,
+        });
     }
 
     pub fn add_custom(&mut self, id: u64, url: &str, name: &str, path: &str) {

@@ -34,7 +34,8 @@ pub fn manager(cx: &Ctx) -> Frame {
             DownloadState::Cancelled => l.pick(["已取消", "已取消", "Cancelled"]).to_string(),
         };
         let source = match d.source {
-            crate::app::DownloadSource::Aera => l.pick(["浏览器", "瀏覽器", "Browser"]),
+            crate::app::DownloadSource::Basic => l.pick(["基本浏览器", "基本瀏覽器", "Basic"]),
+            crate::app::DownloadSource::Aera => l.pick(["AERA", "AERA", "AERA"]),
             crate::app::DownloadSource::Custom => l.pick(["链接", "連結", "Link"]),
         };
         details.push(format!("{source} · {}", d.path));
