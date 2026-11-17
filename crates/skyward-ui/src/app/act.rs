@@ -339,11 +339,13 @@ impl App {
                 if input.is_empty() {
                     self.say(l.pick(["请输入网址", "請輸入網址", "Type an address"]), now);
                 } else {
-                    self.state.aera.loaded = input.clone();
+                    let target = browser_target(&input);
+                    self.state.aera.loaded = target.clone();
+                    self.state.aera.address = target.clone();
                     self.state.aera.address_open = false;
                     self.state.aera.panel = None;
-                    self.state.aera.history.push(input.clone());
-                    return vec![Effect::AeraOpen { url: input }];
+                    self.state.aera.history.push(target.clone());
+                    return vec![Effect::AeraOpen { url: target }];
                 }
             }
             Action::AeraTap(x, y) => return vec![Effect::AeraTap { x, y }],
@@ -1204,4 +1206,28 @@ pub fn download_name(url: &str) -> String {
     }
     name.truncate(120);
     name
+}
+
+/// What the address field opens: a URL, or a Bing search for words.
+fn browser_target(input: &str) -> String {
+    if input.starts_with("http://") || input.starts_with("https://") {
+        return input.to_string();
+    }
+    let host = input.split(['/', '?', '#']).next().unwrap_or(input);
+    if !host.contains(char::is_whitespace)
+        && (host.contains('.') || host == "localhost" || host.parse::<std::net::IpAddr>().is_ok())
+    {
+        return format!("https://{input}");
+    }
+    let mut query = String::new();
+    for byte in input.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            query.push(byte as char);
+        } else if byte == b' ' {
+            query.push('+');
+        } else {
+            query.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    format!("https://www.bing.com/search?q={query}")
 }

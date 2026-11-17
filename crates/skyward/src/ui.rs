@@ -2493,9 +2493,13 @@ fn download_address(address: &str) -> Option<&str> {
         let mut side_download = None;
         if changed {
             let now_at = Instant::now();
+            // While the keyboard is up, keep keys responsive: keyboard
+            // rows redraw on their own and the page frame catches up twice
+            // a second instead of blocking every keystroke.
+            let interval = if self.app.state.aera.keyboard.is_some() { 500 } else { 33 };
             let due = self
                 .aera_frame_at
-                .is_none_or(|last| now_at.duration_since(last) >= Duration::from_millis(33));
+                .is_none_or(|last| now_at.duration_since(last) >= Duration::from_millis(interval));
             if due && self.app.screen() == Screen::AeraBrowser {
                 if let Some(frame) = process.session().frame() {
                     self.app.state.aera.frame = Some(frame.to_vec());
@@ -2533,6 +2537,13 @@ fn download_address(address: &str) -> Option<&str> {
             }
             if let Some(address) = Self::download_address(&status) {
                 side_download = Some(address.to_string());
+            }
+            if (status.starts_with("http://") || status.starts_with("https://"))
+                && !self.app.state.aera.address_open
+                && self.app.state.aera.address != status
+            {
+                self.app.state.aera.address = status.clone();
+                self.app.state.aera.loaded = status.clone();
             }
             self.app.state.aera.status = status;
             redraw = true;
