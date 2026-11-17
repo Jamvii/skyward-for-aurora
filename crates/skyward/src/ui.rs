@@ -1103,6 +1103,21 @@ fn job_end(end: filework::End) -> JobEnd {
 /// are the phone's own that the recovery keeps running: the
 /// configuration's, and those the phone's partitions name for its keys.
 pub fn run(cfg: &DeviceConfig, programs: &[Service], font: &Path, mono: &Path, request: bcb::Request, start: Screen, dump: Option<&Path>) -> Result<()> {
+    // A page bug must leave a trace before panic=abort stops the recovery;
+    // otherwise the machine only shows that init saw a signal 6.
+    std::panic::set_hook(Box::new(|info| {
+        let trace = std::backtrace::Backtrace::force_capture();
+        let message = format!("skyward page panic: {info}\n{trace}\n");
+        let _ = skyward_sys::kmsg(message.trim());
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(skyward_sys::LOG)
+        {
+            use std::io::Write;
+            let _ = file.write_all(message.as_bytes());
+        }
+    }));
     let mut pages = Pages::open(cfg, programs, font, mono, request, start, dump)?;
     pages.begin()?;
     if let Some(logs) = crate::logs::Continuous::resume() {
@@ -1115,7 +1130,28 @@ pub fn run(cfg: &DeviceConfig, programs: &[Service], font: &Path, mono: &Path, r
     // battery is read at once, and the phone stays awake until it is.
     let uevents = uevent::Listener::open()?;
     loop {
-        pages.turn(&sleeper, &uevents)?;
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            pages.turn(&sleeper, &uevents)
+        })) {
+            Ok(turn) => turn?,
+            Err(payload) => {
+                let why = payload
+                    .downcast_ref::<&str>()
+                    .map(|s| (*s).to_string())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "a page panicked".into());
+                let _ = skyward_sys::kmsg(&format!("a page panicked, staying up: {why}"));
+                // The basic reader must not take the whole recovery down
+                // with it. Show the failure on its page and redraw.
+                if pages.app.screen() == Screen::Browser {
+                    pages.app.state.browser.view = skyward_ui::app::BrowserView::Failed {
+                        url: pages.app.state.browser.url.clone(),
+                        why: why.clone(),
+                    };
+                }
+                pages.app.refresh();
+            }
+        }
     }
 }
 

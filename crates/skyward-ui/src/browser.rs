@@ -1321,6 +1321,16 @@ fn decode_png(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::EXPAND);
     let mut reader = decoder.read_info().ok()?;
+    // Check the header's dimensions before the decoder sizes its output:
+    // a small PNG can name an enormous image, and allocating that many
+    // bytes aborts the whole recovery.
+    let (w, h) = {
+        let info = reader.info();
+        (info.width, info.height)
+    };
+    if w == 0 || h == 0 || w as u64 * h as u64 > 16_000_000 {
+        return None;
+    }
     let mut buf = vec![0; reader.output_buffer_size()];
     let info = reader.next_frame(&mut buf).ok()?;
     let (w, h) = (info.width, info.height);
