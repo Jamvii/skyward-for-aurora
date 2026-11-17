@@ -499,8 +499,9 @@ pub mod kms {
         /// The planes showing the buffer, one per layer mixer, with their
         /// FB_ID properties.
         planes: Vec<(plane::Handle, property::Handle)>,
-        /// An overlay plane below the UI, showing the browser frame.
-        overlay: Option<(plane::Handle, property::Handle, Props)>,
+        /// Overlay planes above the browser, one per layer mixer, showing
+        /// the transparent Skyward controls.
+        overlays: Vec<(plane::Handle, property::Handle, Props)>,
         /// The primary planes can blend the transparent page over that
         /// overlay.
         browser_layer: bool,
@@ -669,24 +670,24 @@ pub mod kms {
                 }
                 Buf { db, fb, map: map.cast(), len }
             };
-            let mut overlay = None;
+            let mut overlays = Vec::new();
             for p in card.plane_handles().context("list planes")? {
+                if overlays.len() == strips {
+                    break;
+                }
                 let info = card.get_plane(p).context("read plane")?;
                 let props = Props::read(&card, p)?;
                 if props.value("type")? == PlaneType::Overlay as u64
                     && res.filter_crtcs(info.possible_crtcs()).contains(&crtc)
                     && info.formats().contains(&(fourcc as u32))
                     && props.handle("zpos").is_ok()
+                    && props.handle("alpha").is_ok()
+                    && props.handle("blend_op").is_ok()
                 {
-                    overlay = Some((p, props.handle("FB_ID")?, props));
-                    break;
+                    overlays.push((p, props.handle("FB_ID")?, props));
                 }
             }
-
-            let overlay_blend = overlay
-                .as_ref()
-                .is_some_and(|(_, _, p)| p.handle("alpha").is_ok() && p.handle("blend_op").is_ok());
-            let browser_layer = overlay.is_some() && overlay_blend;
+            let browser_layer = overlays.len() == strips;
 
             let crtc_id = u64::from(u32::from(crtc));
             let mut req = atomic::AtomicModeReq::new();
@@ -797,7 +798,7 @@ pub mod kms {
                 back: 1,
                 flipping: false,
                 planes,
-                overlay,
+                overlays,
                 browser_layer,
                 browser: Some(browser),
                 browser_order: if browser_fourcc == DrmFourcc::Abgr8888 { Order::Rgba } else { Order::Browser },
@@ -932,7 +933,7 @@ pub mod kms {
 
         fn browser_layer_failed(&mut self) {
             self.browser_layer = false;
-            self.overlay = None;
+            self.overlays.clear();
         }
 
         fn present_browser(&mut self, canvas: &Canvas, browser: Option<(&[u8], Rect)>) -> Result<()> {
@@ -976,41 +977,44 @@ pub mod kms {
                             out.copy_from_slice(src);
                         }
                     }
-                    if let Some((plane, fb_prop, props)) = &self.overlay {
-                        // The browser frame is the primary plane, scaled by
-                        // the display processor. The controls are an overlay
-                        // at native screen size, so neither scales the UI.
-                        for (i, (p, f)) in self.planes.iter().enumerate() {
-                            if i == 0 {
-                                req.add_property(*p, *f, property::Value::Framebuffer(Some(browser.fb)));
-                                let _ = req.add_property(*p, Props::read(&self.card, *p)?.handle("CRTC_X")?, property::Value::SignedRange(area.x as i64));
-                            } else {
-                                req.add_property(*p, *f, property::Value::Framebuffer(None));
-                            }
+                    let strips = self.planes.len();
+                    let strip_w = self.w as f32 / strips as f32;
+                    for (i, (plane, fb_prop)) in self.planes.iter().enumerate() {
+                        let strip_x = i as f32 * strip_w;
+                        let x0 = strip_x.max(area.x).min(self.w as f32);
+                        let x1 = (strip_x + strip_w).min(area.x + area.w).min(self.w as f32);
+                        let props = Props::read(&self.card, *plane)?;
+                        if x1 <= x0 || area.h <= 0.0 {
+                            req.add_property(*plane, *fb_prop, property::Value::Framebuffer(None));
+                            continue;
                         }
-                        if let Some((p0, _)) = self.planes.first() {
-                            let props0 = Props::read(&self.card, *p0)?;
-                            req.add_property(*p0, props0.handle("CRTC_X")?, property::Value::SignedRange(area.x as i64));
-                            req.add_property(*p0, props0.handle("CRTC_Y")?, property::Value::SignedRange(area.y as i64));
-                            req.add_property(*p0, props0.handle("CRTC_W")?, property::Value::UnsignedRange(area.w.max(1.0) as u64));
-                            req.add_property(*p0, props0.handle("CRTC_H")?, property::Value::UnsignedRange(area.h.max(1.0) as u64));
-                            req.add_property(*p0, props0.handle("SRC_X")?, property::Value::UnsignedRange(0));
-                            req.add_property(*p0, props0.handle("SRC_Y")?, property::Value::UnsignedRange(0));
-                            req.add_property(*p0, props0.handle("SRC_W")?, property::Value::UnsignedRange((1080u64) << 16));
-                            req.add_property(*p0, props0.handle("SRC_H")?, property::Value::UnsignedRange((2100u64) << 16));
-                            if let Ok(z) = props0.handle("zpos") {
-                                req.add_property(*p0, z, property::Value::UnsignedRange(0));
-                            }
-                        }
-                        req.add_property(*plane, *fb_prop, property::Value::Framebuffer(Some(buf.fb)));
-                        req.add_property(*plane, props.handle("CRTC_X")?, property::Value::SignedRange(0));
-                        req.add_property(*plane, props.handle("CRTC_Y")?, property::Value::SignedRange(0));
-                        req.add_property(*plane, props.handle("CRTC_W")?, property::Value::UnsignedRange(self.w as u64));
-                        req.add_property(*plane, props.handle("CRTC_H")?, property::Value::UnsignedRange(self.h as u64));
-                        req.add_property(*plane, props.handle("SRC_X")?, property::Value::UnsignedRange(0));
+                        let src_x = ((x0 - area.x) / area.w.max(1.0) * 1080.0).round() as u64;
+                        let src_w = ((x1 - x0) / area.w.max(1.0) * 1080.0).round() as u64;
+                        req.add_property(*plane, *fb_prop, property::Value::Framebuffer(Some(browser.fb)));
+                        req.add_property(*plane, props.handle("CRTC_X")?, property::Value::SignedRange(x0 as i64));
+                        req.add_property(*plane, props.handle("CRTC_Y")?, property::Value::SignedRange(area.y as i64));
+                        req.add_property(*plane, props.handle("CRTC_W")?, property::Value::UnsignedRange((x1 - x0).round() as u64));
+                        req.add_property(*plane, props.handle("CRTC_H")?, property::Value::UnsignedRange(area.h.round() as u64));
+                        req.add_property(*plane, props.handle("SRC_X")?, property::Value::UnsignedRange(src_x << 16));
                         req.add_property(*plane, props.handle("SRC_Y")?, property::Value::UnsignedRange(0));
-                        req.add_property(*plane, props.handle("SRC_W")?, property::Value::UnsignedRange((self.w as u64) << 16));
+                        req.add_property(*plane, props.handle("SRC_W")?, property::Value::UnsignedRange(src_w << 16));
+                        req.add_property(*plane, props.handle("SRC_H")?, property::Value::UnsignedRange((2100u64) << 16));
+                        if let Ok(z) = props.handle("zpos") {
+                            req.add_property(*plane, z, property::Value::UnsignedRange(0));
+                        }
+                    }
+                    for (i, (plane, fb_prop, props)) in self.overlays.iter().enumerate() {
+                        let strip_x = i as f32 * strip_w;
+                        req.add_property(*plane, *fb_prop, property::Value::Framebuffer(Some(buf.fb)));
+                        req.add_property(*plane, props.handle("CRTC_X")?, property::Value::SignedRange(strip_x.round() as i64));
+                        req.add_property(*plane, props.handle("CRTC_Y")?, property::Value::SignedRange(0));
+                        req.add_property(*plane, props.handle("CRTC_W")?, property::Value::UnsignedRange(strip_w.round() as u64));
+                        req.add_property(*plane, props.handle("CRTC_H")?, property::Value::UnsignedRange(self.h as u64));
+                        req.add_property(*plane, props.handle("SRC_X")?, property::Value::UnsignedRange((strip_x.round() as u64) << 16));
+                        req.add_property(*plane, props.handle("SRC_Y")?, property::Value::UnsignedRange(0));
+                        req.add_property(*plane, props.handle("SRC_W")?, property::Value::UnsignedRange((strip_w.round() as u64) << 16));
                         req.add_property(*plane, props.handle("SRC_H")?, property::Value::UnsignedRange((self.h as u64) << 16));
+                        req.add_property(*plane, props.handle("CRTC_ID")?, property::Value::CRTC(Some(self.crtc)));
                         if let Ok(z) = props.handle("zpos") {
                             req.add_property(*plane, z, property::Value::UnsignedRange(1));
                         }
@@ -1022,8 +1026,10 @@ pub mod kms {
                         }
                     }
                 }
-            } else if let Some((plane, fb_prop, _)) = &self.overlay {
-                req.add_property(*plane, *fb_prop, property::Value::Framebuffer(None));
+            } else {
+                for (plane, fb_prop, _) in &self.overlays {
+                    req.add_property(*plane, *fb_prop, property::Value::Framebuffer(None));
+                }
             }
             let mut flags = AtomicCommitFlags::NONBLOCK | AtomicCommitFlags::PAGE_FLIP_EVENT;
             if self.power != Power::On {
