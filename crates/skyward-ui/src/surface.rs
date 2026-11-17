@@ -428,9 +428,7 @@ pub mod kms {
                 res.filter_crtcs(i.possible_crtcs()).len(),
                 i.formats().len()
             )?;
-            if i.crtc().is_some() {
-                writeln!(out, "  {}", props.line())?;
-            }
+            writeln!(out, "  {}", props.line())?;
         }
         Ok(out)
     }
@@ -686,7 +684,7 @@ pub mod kms {
             }
 
             let primary_alpha = candidates.iter().all(|c| c.2.handle("alpha").is_ok());
-            let primary_blend = candidates.iter().all(|c| c.2.handle("pixel blend mode").is_ok());
+            let primary_blend = candidates.iter().all(|c| c.2.handle("blend_op").is_ok());
             let browser_layer = overlay.is_some() && primary_alpha && primary_blend;
 
             let crtc_id = u64::from(u32::from(crtc));
@@ -765,10 +763,8 @@ pub mod kms {
                 if let Ok(alpha) = props.handle("alpha") {
                     req.add_property(*plane, alpha, property::Value::UnsignedRange(255));
                 }
-                if let Ok(blend) = props.handle("pixel blend mode")
-                    && let Ok(value) = enum_value(&card, blend, "Pre-multiplied")
-                {
-                    req.add_property(*plane, blend, property::Value::UnsignedRange(value));
+                if let Ok(blend) = props.handle("blend_op") {
+                    req.add_property(*plane, blend, property::Value::UnsignedRange(1));
                 }
                 planes.push((*plane, fb_prop));
             }
