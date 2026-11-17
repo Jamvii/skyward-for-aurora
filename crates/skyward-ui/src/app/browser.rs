@@ -320,11 +320,7 @@ impl App {
                 self.state.browser.quick.clear();
                 self.refresh();
             }
-            Action::BrowserFull => {
-                self.browser_check_full();
-                self.open(Screen::BrowserFull);
-            }
-            Action::BrowserFullLoad => return self.browser_plugin_start_at(self.state.browser.url.clone()),
+            Action::BrowserFull | Action::BrowserFullLoad => return self.browser_open_aera_full(now),
             Action::BrowserBasic => {
                 self.state.browser.full_active = false;
                 let url = self.state.browser.url.clone();
@@ -365,6 +361,27 @@ impl App {
             _ => {}
         }
         Vec::new()
+    }
+
+    /// Full mode is AERA now: open the same URL in the isolated WPE
+    /// browser, with the basic reader page still below it on the stack.
+    fn browser_open_aera_full(&mut self, now: u64) -> Vec<Effect> {
+        let l = self.state.lang;
+        if !self.state.data.storage_open() {
+            self.say(l.pick(DECRYPT_FIRST), now);
+            return Vec::new();
+        }
+        let url = self.state.browser.url.trim().to_string();
+        if !url.is_empty() {
+            self.state.aera.address = url.clone();
+            self.state.aera.loaded = url.clone();
+        }
+        self.open(Screen::AeraBrowser);
+        let mut fx = self.arrive_at(Screen::AeraBrowser);
+        if !url.is_empty() {
+            fx.push(Effect::AeraOpen { url });
+        }
+        fx
     }
 
     pub(super) fn is_browser_action(action: Action) -> bool {

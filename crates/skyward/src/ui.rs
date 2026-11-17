@@ -385,15 +385,19 @@ fn export_logs(recovery: bool, kernel: bool, browser: bool, full: bool, into: &P
         save("kernel.log", skyward_sys::kernel_log()?.as_bytes())?;
     }
     if browser {
+        match fs::read(crate::logs::BASIC) {
+            Ok(log) => save("browser-basic.log", &log)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e).with_context(|| format!("read {}", crate::logs::BASIC)),
+        }
+    }
+    if full {
         match fs::read(crate::logs::AERA) {
-            Ok(log) => save("aera.log", &log)?,
+            Ok(log) => save("browser-aera.log", &log)?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(e).with_context(|| format!("read {}", crate::logs::AERA)),
         }
     }
-    // `full` is kept in the effect for the settings format, but the old
-    // Chromium log is no longer exported.
-    let _ = full;
     Ok(folder)
 }
 

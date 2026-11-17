@@ -2227,6 +2227,7 @@ pub fn advanced(cx: &Ctx) -> Frame {
     let tools = widgets::list(&mut c, t, f, top, &[
         Row::new(l.pick(FILES)).icon(BLUE, Icon::Folder),
         Row::new("Magisk").icon(GREEN, Icon::Shield),
+        Row::new(l.pick(["浏览器", "瀏覽器", "Browser"])).icon(BLUE, Icon::Globe),
         Row::new(l.pick(["下载管理", "下載管理", "Downloads"])).icon(GREEN, Icon::Install),
         Row::new(l.pick(TERMINAL)).icon(SLATE, Icon::Terminal),
         Row::new(l.pick(RELABEL)).icon(PURPLE, Icon::Shield),
@@ -2237,6 +2238,7 @@ pub fn advanced(cx: &Ctx) -> Frame {
     let out = hits(&tools.rows, &[
         Action::Open(Screen::Files),
         Action::Open(Screen::Magisk),
+        Action::Open(Screen::Browser),
         Action::Open(Screen::Downloads),
         Action::Open(Screen::Terminal),
         Action::Open(Screen::Relabel),
@@ -3590,11 +3592,14 @@ pub fn logs(cx: &Ctx) -> Frame {
         Row::new(l.pick(["内核日志", "核心記錄", "Kernel log"]))
             .subtitle(l.pick(["本次开机以来的内核消息", "本次開機以來的核心訊息", "The kernel's messages since this start"]))
             .trail(Trail::Check(s.logs[1])),
-        Row::new(l.pick(["AERA 浏览器日志", "AERA 瀏覽器記錄", "AERA browser log"]))
-            .subtitle(l.pick(["地址、触摸、键盘和 AERA 运行状态", "網址、觸控、鍵盤和 AERA 執行狀態", "Addresses, touches, keyboard and AERA status"]))
+        Row::new(l.pick(["基本浏览器日志", "基本瀏覽器記錄", "Basic browser log"]))
+            .subtitle(l.pick(["网页读取、图片、表单和下载", "網頁讀取、圖片、表單和下載", "Pages, images, forms and downloads"]))
             .trail(Trail::Check(s.logs[2])),
+        Row::new(l.pick(["AERA 完整浏览器日志", "AERA 完整瀏覽器記錄", "AERA full browser log"]))
+            .subtitle(l.pick(["地址、触摸、键盘和 AERA 运行状态", "網址、觸控、鍵盤和 AERA 執行狀態", "Addresses, touches, keyboard and AERA status"]))
+            .trail(Trail::Check(s.logs[3])),
     ]);
-    out.extend(hits(&parts.rows, &[Action::LogPart(0), Action::LogPart(1), Action::LogPart(2)]));
+    out.extend(hits(&parts.rows, &[Action::LogPart(0), Action::LogPart(1), Action::LogPart(2), Action::LogPart(3)]));
     let y = widgets::section(&mut c, t, f, parts.bottom, l.pick(["持续模式", "持續模式", "Continuous mode"]));
     let continuous = widgets::list(&mut c, t, f, y, &[
         Row::new(l.pick(["持续写入同一文件", "持續寫入同一檔案", "Keep writing to one file"]))

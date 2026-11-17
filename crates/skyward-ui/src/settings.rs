@@ -21,7 +21,7 @@ const STORAGE: &str = "storage";
 const USB_DRIVE: &str = "usb_drive";
 /// The logs exported, and where they go, by name, in the order of the page
 /// that exports them.
-const LOGS: [&str; 4] = ["recovery", "kernel", "aera", "full"];
+const LOGS: [&str; 4] = ["recovery", "kernel", "browser", "aera"];
 const LOG_PLACES: [&str; 2] = ["temporary", "storage"];
 
 /// The settings as they are kept. A value missing is the one a recovery

@@ -221,9 +221,9 @@ fn home(cx: &Ctx) -> Frame {
     y = list.bottom;
 
     y = widgets::section(&mut c, t, f, y, l.pick(["更多", "更多", "More"]));
-    let full = Row::new(l.pick(["完整模式（Linux Chromium）", "完整模式（Linux Chromium）", "Full mode (Linux Chromium)"]))
+    let full = Row::new(l.pick(["完整模式（AERA）", "完整模式（AERA）", "Full mode (AERA)"]))
         .icon(PURPLE, Icon::Layers)
-        .subtitle(l.pick(["外置插件，解密后可安装", "外置外掛，解密後可安裝", "An external plugin, installed after decryption"]));
+        .subtitle(l.pick(["AERA WPE 浏览器，解密后使用", "AERA WPE 瀏覽器，解密後使用", "The AERA WPE browser, after decryption"]));
     let list = widgets::list(&mut c, t, f, y, &[full]);
     out.extend(hits(&list.rows, &[Action::BrowserFull]));
     y = list.bottom;
@@ -1166,7 +1166,7 @@ pub fn menu(cx: &Ctx) -> Frame {
         .icon(ORANGE, Icon::Backup)
         .trail(Trail::None),
         Row::new(l.pick(["下载", "下載", "Downloads"])).icon(GREEN, Icon::Install).trail(Trail::Arrow),
-        Row::new(l.pick(["完整模式", "完整模式", "Full mode"])).icon(PURPLE, Icon::Layers).trail(Trail::Arrow),
+        Row::new(l.pick(["完整模式（AERA）", "完整模式（AERA）", "Full mode (AERA)"])).icon(PURPLE, Icon::Layers).trail(Trail::Arrow),
     ];
     let list = widgets::list(&mut c, t, f, y, &rows);
     out.extend(hits(&list.rows, &[

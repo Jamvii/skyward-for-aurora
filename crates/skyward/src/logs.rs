@@ -11,7 +11,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// The AERA browser's own event log, written by the recovery UI.
+/// The basic reader browser's log, written by its worker.
+pub const BASIC: &str = "/skyward/run/browser.log";
+/// The AERA full browser's own event log, written by the recovery UI.
 pub const AERA: &str = "/skyward/run/aera.log";
 
 const EVERY: Duration = Duration::from_millis(500);
@@ -104,10 +106,11 @@ fn folder() -> PathBuf {
     }
 }
 
-fn sources() -> [(&'static str, PathBuf); 2] {
+fn sources() -> [(&'static str, PathBuf); 3] {
     [
         ("recovery", PathBuf::from(skyward_sys::LOG)),
-        ("aera", PathBuf::from(AERA)),
+        ("browser-basic", PathBuf::from(BASIC)),
+        ("browser-aera", PathBuf::from(AERA)),
     ]
 }
 
