@@ -68,6 +68,7 @@ mod wlan;
 pub use backup::*;
 pub use aera::{Aera, AeraPanel};
 pub use downloads::{DownloadSource, DownloadState, ManagerDownload, ManagerDownloads};
+pub use act::download_name;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DownloadEventKind { Started, Progress, Finished, Failed, Cancelled }

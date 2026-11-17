@@ -2424,6 +2424,42 @@ fn ensure_aera_runtime() -> Result<()> {
     Ok(())
 }
 
+/// A file-like URL the browser is navigating to; WebKit's response policy
+/// does not turn these into downloads in this worker, so the manager fetches
+/// the same URL directly.
+fn download_address(address: &str) -> Option<&str> {
+    let path = address.split(['?', '#']).next().unwrap_or(address);
+    let lower = path.to_ascii_lowercase();
+    (address.starts_with("http://") || address.starts_with("https://"))
+        .then_some(())
+        .filter(|_| [".apk", ".apks", ".xapk", ".zip", ".7z", ".bin", ".img"].iter().any(|e| lower.ends_with(e)))
+        .map(|_| address)
+}
+
+    /// Fetch a file the page navigated to but the AERA worker did not turn
+    /// into a DownloadStarted event.
+    fn start_side_download(&mut self, url: &str) {
+        if self.app.state.downloads.items.iter().any(|d| d.url == url && d.active()) {
+            return;
+        }
+        let name = skyward_ui::app::download_name(url);
+        let path = format!("/sdcard/AERA/Downloads/{name}");
+        let id = self.app.state.downloads.next_custom_id();
+        self.app.state.downloads.add_custom(id, url, &name, &path);
+        Self::aera_log(&format!("side download {url} -> {path}"));
+        if let Some(parent) = Path::new(&path).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match crate::browser::Worker::start(
+            crate::browser::Task::Save { url: url.into(), path: PathBuf::from(path) },
+            self.servers.clone(),
+        ) {
+            Ok(worker) => self.download_jobs.push((id, worker)),
+            Err(e) => self.app.manager_download_ended(id, Err(format!("{e:#}"))),
+        }
+        self.app.refresh();
+    }
+
 /// Take any AERA frame the worker published, acknowledge it, and keep
 /// the page's status in step.
     fn aera_told(&mut self) -> Result<()> {
@@ -2435,6 +2471,7 @@ fn ensure_aera_runtime() -> Result<()> {
         }
         let changed = process.session().poll();
         let mut redraw = false;
+        let mut side_download = None;
         if changed {
             let now_at = Instant::now();
             let due = self
@@ -2474,6 +2511,9 @@ fn ensure_aera_runtime() -> Result<()> {
         if self.app.state.aera.status != status {
             if !status.is_empty() {
                 Self::aera_log(&format!("status: {status}"));
+            }
+            if let Some(address) = Self::download_address(&status) {
+                side_download = Some(address.to_string());
             }
             self.app.state.aera.status = status;
             redraw = true;
