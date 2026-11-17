@@ -2227,7 +2227,6 @@ pub fn advanced(cx: &Ctx) -> Frame {
     let tools = widgets::list(&mut c, t, f, top, &[
         Row::new(l.pick(FILES)).icon(BLUE, Icon::Folder),
         Row::new("Magisk").icon(GREEN, Icon::Shield),
-        Row::new(l.pick(["浏览器", "瀏覽器", "Browser"])).icon(BLUE, Icon::Globe),
         Row::new(l.pick(["下载管理", "下載管理", "Downloads"])).icon(GREEN, Icon::Install),
         Row::new(l.pick(TERMINAL)).icon(SLATE, Icon::Terminal),
         Row::new(l.pick(RELABEL)).icon(PURPLE, Icon::Shield),
@@ -2238,7 +2237,6 @@ pub fn advanced(cx: &Ctx) -> Frame {
     let out = hits(&tools.rows, &[
         Action::Open(Screen::Files),
         Action::Open(Screen::Magisk),
-        Action::Open(Screen::Browser),
         Action::Open(Screen::Downloads),
         Action::Open(Screen::Terminal),
         Action::Open(Screen::Relabel),
