@@ -675,7 +675,7 @@ pub mod kms {
                 let props = Props::read(&card, p)?;
                 if props.value("type")? == PlaneType::Overlay as u64
                     && res.filter_crtcs(info.possible_crtcs()).contains(&crtc)
-                    && info.formats().contains(&(browser_fourcc as u32))
+                    && info.formats().contains(&(fourcc as u32))
                     && props.handle("zpos").is_ok()
                 {
                     overlay = Some((p, props.handle("FB_ID")?, props));
@@ -683,9 +683,10 @@ pub mod kms {
                 }
             }
 
-            let primary_alpha = candidates.iter().all(|c| c.2.handle("alpha").is_ok());
-            let primary_blend = candidates.iter().all(|c| c.2.handle("blend_op").is_ok());
-            let browser_layer = overlay.is_some() && primary_alpha && primary_blend;
+            let overlay_blend = overlay
+                .as_ref()
+                .is_some_and(|(_, _, p)| p.handle("alpha").is_ok() && p.handle("blend_op").is_ok());
+            let browser_layer = overlay.is_some() && overlay_blend;
 
             let crtc_id = u64::from(u32::from(crtc));
             let mut req = atomic::AtomicModeReq::new();
@@ -976,24 +977,48 @@ pub mod kms {
                         }
                     }
                     if let Some((plane, fb_prop, props)) = &self.overlay {
-                        req.add_property(*plane, *fb_prop, property::Value::Framebuffer(Some(browser.fb)));
-                        if let Ok(zpos) = props.handle("zpos") {
-                            req.add_property(*plane, zpos, property::Value::UnsignedRange(0));
+                        // The browser frame is the primary plane, scaled by
+                        // the display processor. The controls are an overlay
+                        // at native screen size, so neither scales the UI.
+                        for (i, (p, f)) in self.planes.iter().enumerate() {
+                            if i == 0 {
+                                req.add_property(*p, *f, property::Value::Framebuffer(Some(browser.fb)));
+                                let _ = req.add_property(*p, Props::read(&self.card, *p)?.handle("CRTC_X")?, property::Value::SignedRange(area.x as i64));
+                            } else {
+                                req.add_property(*p, *f, property::Value::Framebuffer(None));
+                            }
                         }
-                        if let Ok(alpha) = props.handle("alpha") {
-                            req.add_property(*plane, alpha, property::Value::UnsignedRange(255));
+                        if let Some((p0, _)) = self.planes.first() {
+                            let props0 = Props::read(&self.card, *p0)?;
+                            req.add_property(*p0, props0.handle("CRTC_X")?, property::Value::SignedRange(area.x as i64));
+                            req.add_property(*p0, props0.handle("CRTC_Y")?, property::Value::SignedRange(area.y as i64));
+                            req.add_property(*p0, props0.handle("CRTC_W")?, property::Value::UnsignedRange(area.w.max(1.0) as u64));
+                            req.add_property(*p0, props0.handle("CRTC_H")?, property::Value::UnsignedRange(area.h.max(1.0) as u64));
+                            req.add_property(*p0, props0.handle("SRC_X")?, property::Value::UnsignedRange(0));
+                            req.add_property(*p0, props0.handle("SRC_Y")?, property::Value::UnsignedRange(0));
+                            req.add_property(*p0, props0.handle("SRC_W")?, property::Value::UnsignedRange((1080u64) << 16));
+                            req.add_property(*p0, props0.handle("SRC_H")?, property::Value::UnsignedRange((2100u64) << 16));
+                            if let Ok(z) = props0.handle("zpos") {
+                                req.add_property(*p0, z, property::Value::UnsignedRange(0));
+                            }
                         }
+                        req.add_property(*plane, *fb_prop, property::Value::Framebuffer(Some(buf.fb)));
+                        req.add_property(*plane, props.handle("CRTC_X")?, property::Value::SignedRange(0));
+                        req.add_property(*plane, props.handle("CRTC_Y")?, property::Value::SignedRange(0));
+                        req.add_property(*plane, props.handle("CRTC_W")?, property::Value::UnsignedRange(self.w as u64));
+                        req.add_property(*plane, props.handle("CRTC_H")?, property::Value::UnsignedRange(self.h as u64));
                         req.add_property(*plane, props.handle("SRC_X")?, property::Value::UnsignedRange(0));
                         req.add_property(*plane, props.handle("SRC_Y")?, property::Value::UnsignedRange(0));
-                        req.add_property(*plane, props.handle("SRC_W")?, property::Value::UnsignedRange((1080u64) << 16));
-                        req.add_property(*plane, props.handle("SRC_H")?, property::Value::UnsignedRange((2100u64) << 16));
-                        req.add_property(*plane, props.handle("CRTC_X")?, property::Value::SignedRange(area.x as i64));
-                        req.add_property(*plane, props.handle("CRTC_Y")?, property::Value::SignedRange(area.y as i64));
-                        req.add_property(*plane, props.handle("CRTC_W")?, property::Value::UnsignedRange(area.w.max(1.0) as u64));
-                        req.add_property(*plane, props.handle("CRTC_H")?, property::Value::UnsignedRange(area.h.max(1.0) as u64));
-                        req.add_property(*plane, props.handle("CRTC_ID")?, property::Value::CRTC(Some(self.crtc)));
-                        if let Ok(alpha) = props.handle("alpha") {
-                            req.add_property(*plane, alpha, property::Value::UnsignedRange(255));
+                        req.add_property(*plane, props.handle("SRC_W")?, property::Value::UnsignedRange((self.w as u64) << 16));
+                        req.add_property(*plane, props.handle("SRC_H")?, property::Value::UnsignedRange((self.h as u64) << 16));
+                        if let Ok(z) = props.handle("zpos") {
+                            req.add_property(*plane, z, property::Value::UnsignedRange(1));
+                        }
+                        if let Ok(a) = props.handle("alpha") {
+                            req.add_property(*plane, a, property::Value::UnsignedRange(255));
+                        }
+                        if let Ok(b) = props.handle("blend_op") {
+                            req.add_property(*plane, b, property::Value::UnsignedRange(1));
                         }
                     }
                 }
