@@ -179,6 +179,7 @@ fn run(root: &Path) -> Result<(), String> {
     // recovery, or it fails before libc sends DNS.
     let env: Vec<CString> = [
         "PATH=/usr/bin",
+        "LD_PRELOAD=/usr/lib/libaera-gpu.so",
         "HOME=/tmp",
         "TMPDIR=/tmp",
         "LANG=en.UTF-8",
