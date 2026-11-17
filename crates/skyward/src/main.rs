@@ -23,6 +23,7 @@ mod haptics;
 mod input;
 #[cfg(target_os = "android")]
 mod keys;
+mod logs;
 #[cfg(target_os = "android")]
 mod magisk;
 #[cfg(target_os = "android")]

@@ -159,7 +159,11 @@ impl Default for Browser {
             full_progress: None,
             tabs: vec![BrowserTab::home()],
             active: 0,
-            quick: Vec::new(),
+            quick: vec![
+                QuickLink { title: "Bing".into(), url: "https://www.bing.com/".into(), color: Rgba::rgb(0x2f, 0x80, 0xe8), icon: Icon::Globe },
+                QuickLink { title: "Baidu".into(), url: "https://www.baidu.com/".into(), color: Rgba::rgb(0x30, 0x8a, 0xff), icon: Icon::Globe },
+                QuickLink { title: "GitHub".into(), url: "https://github.com/".into(), color: Rgba::rgb(0x24, 0x29, 0x2e), icon: Icon::Terminal },
+            ],
             recent: Vec::new(),
             bookmarks: Vec::new(),
             plugin_download: None,
@@ -205,7 +209,7 @@ impl App {
                 self.state.browser.close_tab(i);
                 self.refresh();
             }
-            Action::BrowserDownloads => self.open(Screen::BrowserDownloads),
+            Action::BrowserDownloads => self.open(Screen::Downloads),
             Action::BrowserLink(i) => {
                 if let Some(url) = self.state.browser.page().and_then(|p| p.blocks.get(i)).and_then(|b| match b {
                     skyward_net::web::Block::Link { url, .. } => Some(url.clone()),
@@ -320,11 +324,7 @@ impl App {
                 self.state.browser.quick.clear();
                 self.refresh();
             }
-            Action::BrowserFull => {
-                self.browser_check_full();
-                self.open(Screen::BrowserFull);
-            }
-            Action::BrowserFullLoad => return self.browser_plugin_start_at(self.state.browser.url.clone()),
+            Action::BrowserFull | Action::BrowserFullLoad => return self.browser_open_aera_full(now),
             Action::BrowserBasic => {
                 self.state.browser.full_active = false;
                 let url = self.state.browser.url.clone();
@@ -365,6 +365,27 @@ impl App {
             _ => {}
         }
         Vec::new()
+    }
+
+    /// Full mode is AERA now: open the same URL in the isolated WPE
+    /// browser, with the basic reader page still below it on the stack.
+    fn browser_open_aera_full(&mut self, now: u64) -> Vec<Effect> {
+        let l = self.state.lang;
+        if !self.state.data.storage_open() {
+            self.say(l.pick(DECRYPT_FIRST), now);
+            return Vec::new();
+        }
+        let url = self.state.browser.url.trim().to_string();
+        if !url.is_empty() {
+            self.state.aera.address = url.clone();
+            self.state.aera.loaded = url.clone();
+        }
+        self.open(Screen::AeraBrowser);
+        let mut fx = self.arrive_at(Screen::AeraBrowser);
+        if !url.is_empty() {
+            fx.push(Effect::AeraOpen { url });
+        }
+        fx
     }
 
     pub(super) fn is_browser_action(action: Action) -> bool {
@@ -434,18 +455,11 @@ impl App {
 
     fn browser_download(&mut self, url: String, name: String, _now: u64) -> Vec<Effect> {
         let path = format!("/sdcard/Download/Skyward/{name}");
-        self.state.browser.downloads.push(BrowserDownload {
-            name: name.clone(),
-            url: url.clone(),
-            path: path.clone(),
-            size: None,
-            done: 0,
-            state: BrowserSave::Downloading { done: 0, total: None },
-        });
-        self.state.browser.saving = Some(self.state.browser.downloads.len() - 1);
-        self.open(Screen::BrowserDownloads);
+        let id = self.state.downloads.next_basic_id();
+        self.state.downloads.add_basic(id, &url, &name, &path);
+        self.open(Screen::Downloads);
         self.refresh();
-        vec![Effect::BrowserDownload { url, name, path }]
+        vec![Effect::DownloadStart { id, url, name, path }]
     }
 
     pub fn browser_opened(&mut self, opened: Result<skyward_net::web::Opened, String>) {

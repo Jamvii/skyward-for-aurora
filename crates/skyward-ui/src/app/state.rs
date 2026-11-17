@@ -72,11 +72,14 @@ pub struct State {
     pub restore: Option<(BackupEntry, [bool; 4])>,
     /// Backing up or restoring under way, or how it last ended.
     pub backup_job: Option<BackupJob>,
-    /// Which logs to export: the recovery's, the kernel's.
-    pub logs: [bool; 2],
+    /// Which logs to export: the recovery's, the kernel's, and AERA's.
+    pub logs: [bool; 4],
     /// Where the logs go: 0 for the temporary folder, 1 for internal
     /// storage.
     pub logs_to: usize,
+    /// Whether the logs are copied continuously into one file, so a crash
+    /// and the recovery's reload keep what led to them.
+    pub logs_continuous: bool,
     /// What the phone's boot control holds of the slots, as the runtime
     /// last read it for the slot or reboot page, or why it could not.
     pub boot_slots: Option<Result<BootSlots, String>>,
@@ -114,11 +117,20 @@ pub struct State {
     /// What is typed to find an entry in the folder, and the entries it
     /// found, by their places in the folder.
     pub files_search: String,
+    /// Whether the file manager's search field is open over it.
+    pub files_searching: bool,
+    /// When the search field started coming up, and how far it has come.
+    pub files_search_at: Option<u64>,
+    pub files_search_anim: f32,
     pub files_found: Vec<usize>,
     /// Magisk, KernelSU or APatch and its modules.
     pub magisk: crate::magisk::Magisk,
     /// The browser's pages and what it is doing.
     pub browser: super::Browser,
+    /// The independent download manager.
+    pub downloads: super::ManagerDownloads,
+    /// The AERA WPE browser.
+    pub aera: super::Aera,
     /// The folder of internal storage a file to install is chosen in, its
     /// path from the top of the storage.
     pub storage: Folder,
@@ -229,8 +241,9 @@ impl Default for State {
             backups: Vec::new(),
             restore: None,
             backup_job: None,
-            logs: [true, true],
+            logs: [true, true, false, false],
             logs_to: 0,
+            logs_continuous: false,
             boot_slots: None,
             next_slot: None,
             dual_boot: false,
@@ -245,9 +258,14 @@ impl Default for State {
             held: None,
             files: Folder::new("/"),
             files_search: String::new(),
+            files_searching: false,
+            files_search_at: None,
+            files_search_anim: 1.0,
             files_found: Vec::new(),
             magisk: crate::magisk::Magisk::default(),
             browser: super::Browser::default(),
+            downloads: super::ManagerDownloads::default(),
+            aera: super::Aera::default(),
             storage: Folder::new(""),
             usb_drive: None,
             drive: Folder::new(""),

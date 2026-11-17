@@ -86,6 +86,10 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::Magisk => crate::magisk::screen(cx),
         Screen::Browser => crate::browser::screen(cx),
         Screen::BrowserAddress => crate::browser::address(cx),
+        Screen::AeraBrowser => crate::aera::browser(cx),
+        Screen::Downloads => crate::downloads::manager(cx),
+        Screen::DownloadLink => crate::downloads::link(cx),
+        Screen::AeraAddress => crate::aera::address(cx),
         Screen::BrowserDownloads => crate::browser::downloads(cx),
         Screen::BrowserForm => crate::browser::form(cx),
         Screen::BrowserFull => crate::browser::full(cx),
@@ -1768,8 +1772,12 @@ pub fn wipe(cx: &Ctx) -> Frame {
 
 /// A page laid out above the on-screen keyboard: where the keyboard's top
 /// is, and its keys as touch targets.
-fn keyboard_hits(c: &mut Canvas, t: &Theme, f: &Fonts, s: &State, enter: &str, out: &mut Vec<Hit>) -> f32 {
-    let top = t.m.h as f32 - widgets::keyboard_height(t);
+pub(crate) fn keyboard_hits(c: &mut Canvas, t: &Theme, f: &Fonts, s: &State, enter: &str, out: &mut Vec<Hit>) -> f32 {
+    keyboard_hits_at(c, t, f, s, t.m.h as f32 - widgets::keyboard_height(t), enter, out)
+}
+
+/// The keyboard at `top`, for a page that slides it up from the bottom.
+pub(crate) fn keyboard_hits_at(c: &mut Canvas, t: &Theme, f: &Fonts, s: &State, top: f32, enter: &str, out: &mut Vec<Hit>) -> f32 {
     let keys = widgets::keyboard(c, t, f, s.lang, top, s.layer, s.key_held(), enter);
     out.extend(keys.into_iter().map(|(rect, cap)| Hit { rect, action: Action::Type(cap) }));
     top
@@ -2219,8 +2227,7 @@ pub fn advanced(cx: &Ctx) -> Frame {
     let tools = widgets::list(&mut c, t, f, top, &[
         Row::new(l.pick(FILES)).icon(BLUE, Icon::Folder),
         Row::new("Magisk").icon(GREEN, Icon::Shield),
-        Row::new(l.pick(["OTG 文件", "OTG 檔案", "OTG files"])).icon(ORANGE, Icon::Usb),
-        Row::new(l.pick(["浏览器", "瀏覽器", "Browser"])).icon(BLUE, Icon::Globe),
+        Row::new(l.pick(["下载管理", "下載管理", "Downloads"])).icon(GREEN, Icon::Install),
         Row::new(l.pick(TERMINAL)).icon(SLATE, Icon::Terminal),
         Row::new(l.pick(RELABEL)).icon(PURPLE, Icon::Shield),
         Row::new(l.pick(FILESYSTEMS)).icon(RED, Icon::Mount),
@@ -2230,8 +2237,7 @@ pub fn advanced(cx: &Ctx) -> Frame {
     let out = hits(&tools.rows, &[
         Action::Open(Screen::Files),
         Action::Open(Screen::Magisk),
-        Action::FilesOtg,
-        Action::Open(Screen::Browser),
+        Action::Open(Screen::Downloads),
         Action::Open(Screen::Terminal),
         Action::Open(Screen::Relabel),
         Action::Open(Screen::Filesystems),
@@ -3106,6 +3112,9 @@ pub fn wlan_network(cx: &Ctx) -> Frame {
 pub fn files(cx: &Ctx) -> Frame {
     let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
     let m = &t.m;
+    if s.files_searching {
+        return files_search(cx);
+    }
     // An entry picked to copy or move goes to the folder shown, from the
     // bar held at the bottom.
     let dock = s.clip.as_ref().map(|clip| {
@@ -3122,9 +3131,19 @@ pub fn files(cx: &Ctx) -> Frame {
     frame.dock = dock;
     frame.button = button;
     if s.files.entries.is_ok() {
-        let bar = Rect::new(m.margin, frame.content_top - m.dp(52.0), m.w as f32 - m.margin * 2.0, m.dp(44.0));
-        frame.fold = Some(Fold { bar, hint: l.pick(["搜索当前文件夹", "搜尋目前資料夾", "Search this folder"]), span: m.dp(52.0) });
+        let delta = m.search_h + m.dp(12.0);
+        let bar = Rect::new(m.margin, frame.content_top, m.w as f32 - m.margin * 2.0, m.search_h);
+        frame.fold = Some(Fold { bar, hint: l.pick(["搜索当前文件夹", "搜尋目前資料夾", "Search this folder"]), span: delta });
         frame.hits.push(Hit { rect: bar, action: Action::FilesSearch });
+        frame.content_top += delta;
+        if let Some(pinned) = &mut frame.pinned {
+            pinned.top += delta;
+        }
+        if let Some(rows) = &mut frame.rows {
+            for edge in &mut rows.edges {
+                *edge += delta;
+            }
+        }
     }
     frame
 }
@@ -3141,8 +3160,10 @@ pub fn files_search(cx: &Ctx) -> Frame {
     let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
     let m = &t.m;
     let mut c = page(cx);
+    let q = s.files_search_anim.clamp(0.0, 1.0);
     let (at, cancel) = widgets::search_layout(t);
-    let field = widgets::search_field(&mut c, t, f, at.x, at.w, at.y + at.h / 2.0, &s.files_search, l.pick(["搜索当前文件夹", "搜尋目前資料夾", "Search this folder"]));
+    let field_y = m.content_top + (at.y - m.content_top) * q;
+    let field = widgets::search_field(&mut c, t, f, at.x, at.w, field_y + at.h / 2.0, &s.files_search, l.pick(["搜索当前文件夹", "搜尋目前資料夾", "Search this folder"]));
     widgets::cancel_button(&mut c, t, cancel);
     let mut out = vec![Hit { rect: cancel, action: Action::FilesSearchClose }];
     let top = field.field.y + field.field.h + m.dp(12.0);
@@ -3166,7 +3187,8 @@ pub fn files_search(cx: &Ctx) -> Frame {
             out.extend(list.rows.iter().enumerate().map(|(i, &r)| Hit { rect: r, action: Action::OpenFound(i) }));
         }
     }
-    keyboard_hits(&mut c, t, f, s, l.pick(["搜索", "搜尋", "Search"]), &mut out);
+    let keys_top = m.h as f32 - widgets::keyboard_height(t) * q;
+    keyboard_hits_at(&mut c, t, f, s, keys_top, l.pick(["搜索", "搜尋", "Search"]), &mut out);
     if let Some(rect) = field.clear {
         out.push(Hit { rect, action: Action::ClearSearch });
     }
@@ -3241,6 +3263,7 @@ pub fn row(screen: Screen, cx: &Ctx, i: usize, c: &mut Canvas) {
             let entries = folder.entries.as_ref().expect("a folder listed draws its rows");
             files::row(c, cx.t, cx.f, cx.state.lang, &entries[i], folder.listed, cx.state.time_zone);
         }
+        Screen::Browser => crate::browser::row(cx, i, c),
         Screen::Installing => widgets::output_row(c, cx.t, cx.f, &cx.state.script_output, i),
         Screen::PartWork => {
             let work = cx.state.part_work.as_ref().expect("the page of partition work shows work");
@@ -3557,7 +3580,7 @@ pub fn time_zone(cx: &Ctx) -> Frame {
 /// Saving the logs, as a bug report asks for them.
 pub fn logs(cx: &Ctx) -> Frame {
     let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
-    let mut c = page(cx);
+    let mut c = long_page(cx);
     let mut out = Vec::new();
     let top = t.m.content_top;
     let y = widgets::section_first(&mut c, t, f, top, l.pick(["日志内容", "記錄內容", "Logs"]));
@@ -3568,9 +3591,27 @@ pub fn logs(cx: &Ctx) -> Frame {
         Row::new(l.pick(["内核日志", "核心記錄", "Kernel log"]))
             .subtitle(l.pick(["本次开机以来的内核消息", "本次開機以來的核心訊息", "The kernel's messages since this start"]))
             .trail(Trail::Check(s.logs[1])),
+        Row::new(l.pick(["基本浏览器日志", "基本瀏覽器記錄", "Basic browser log"]))
+            .subtitle(l.pick(["网页读取、图片、表单和下载", "網頁讀取、圖片、表單和下載", "Pages, images, forms and downloads"]))
+            .trail(Trail::Check(s.logs[2])),
+        Row::new(l.pick(["AERA 完整浏览器日志", "AERA 完整瀏覽器記錄", "AERA full browser log"]))
+            .subtitle(l.pick(["地址、触摸、键盘和 AERA 运行状态", "網址、觸控、鍵盤和 AERA 執行狀態", "Addresses, touches, keyboard and AERA status"]))
+            .trail(Trail::Check(s.logs[3])),
     ]);
-    out.extend(hits(&parts.rows, &[Action::LogPart(0), Action::LogPart(1)]));
-    let y = widgets::section(&mut c, t, f, parts.bottom, l.pick(["保存到", "儲存到", "Save to"]));
+    out.extend(hits(&parts.rows, &[Action::LogPart(0), Action::LogPart(1), Action::LogPart(2), Action::LogPart(3)]));
+    let y = widgets::section(&mut c, t, f, parts.bottom, l.pick(["持续模式", "持續模式", "Continuous mode"]));
+    let continuous = widgets::list(&mut c, t, f, y, &[
+        Row::new(l.pick(["持续写入同一文件", "持續寫入同一檔案", "Keep writing to one file"]))
+            .subtitle(l.pick(["/sdcard/Skyward/logs/continuous.log，浏览器崩溃或 Recovery 重载后仍保留", "/sdcard/Skyward/logs/continuous.log，瀏覽器崩潰或 Recovery 重載後仍保留", "/sdcard/Skyward/logs/continuous.log, kept through a browser crash or a recovery reload"]))
+            .trail(Trail::Switch(s.logs_continuous)),
+    ]);
+    out.extend(hits(&continuous.rows, &[Action::LogContinuous]));
+    let y = widgets::footnote(&mut c, t, f, continuous.bottom, l.pick([
+        "开启后每半秒追加一次；关闭后停止。文件只追加，不覆盖。",
+        "開啟後每半秒追加一次；關閉後停止。檔案只追加，不覆蓋。",
+        "Appends every half second while on, and stops when off. The file is only appended to.",
+    ]));
+    let y = widgets::section(&mut c, t, f, y, l.pick(["保存到", "儲存到", "Save to"]));
     let storage = l.pick(match cx.state.data.storage_open() {
         true => ["Skyward/logs 文件夹", "Skyward/logs 資料夾", "The Skyward/logs folder"],
         false => DECRYPT_NEEDED,
@@ -3590,7 +3631,7 @@ pub fn logs(cx: &Ctx) -> Frame {
     let y = widgets::footnote(&mut c, t, f, places.bottom, note);
     let export = widgets::button(&mut c, t, f, y + t.m.dp(24.0), l.pick(["导出", "匯出", "Export"]));
     out.push(Hit { rect: export, action: Action::ExportLogs });
-    Frame::new(t, c, out, l.pick(LOGS), top)
+    Frame::new(t, fit(c, t, export.y + export.h), out, l.pick(LOGS), top)
 }
 
 /// Skyward's licence, in Chinese, ahead of the words the licence gives for

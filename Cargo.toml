@@ -1,7 +1,9 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/aera-browser-jail",
     "crates/skyward",
+    "crates/skyward-aera",
     "crates/skyward-config",
     "crates/skyward-binder",
     "crates/skyward-backup",
@@ -44,7 +46,7 @@ opt-level = "z"
 # for size, over the UI's own.
 lto = false
 codegen-units = 1
-panic = "abort"
+panic = "unwind"
 strip = true
 
 # The UI draws every pixel of every frame; it is built for speed.
