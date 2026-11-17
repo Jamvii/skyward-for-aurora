@@ -687,7 +687,12 @@ pub mod kms {
                     overlays.push((p, props.handle("FB_ID")?, props));
                 }
             }
-            let browser_layer = overlays.len() == strips;
+            // The overlay experiment is not stable yet: on this panel the
+            // plane transition black-screens the page and makes the back
+            // transition fail the atomic commit. Keep the CPU browser page
+            // until the plane parameters are proven on hardware.
+            let overlays: Vec<(plane::Handle, property::Handle, Props)> = Vec::new();
+            let browser_layer = false;
 
             let crtc_id = u64::from(u32::from(crtc));
             let mut req = atomic::AtomicModeReq::new();
