@@ -159,7 +159,11 @@ impl Default for Browser {
             full_progress: None,
             tabs: vec![BrowserTab::home()],
             active: 0,
-            quick: Vec::new(),
+            quick: vec![
+                QuickLink { title: "Bing".into(), url: "https://www.bing.com/".into(), color: Rgba::rgb(0x2f, 0x80, 0xe8), icon: Icon::Globe },
+                QuickLink { title: "Baidu".into(), url: "https://www.baidu.com/".into(), color: Rgba::rgb(0x30, 0x8a, 0xff), icon: Icon::Globe },
+                QuickLink { title: "GitHub".into(), url: "https://github.com/".into(), color: Rgba::rgb(0x24, 0x29, 0x2e), icon: Icon::Terminal },
+            ],
             recent: Vec::new(),
             bookmarks: Vec::new(),
             plugin_download: None,

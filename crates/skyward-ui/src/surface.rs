@@ -631,8 +631,8 @@ pub mod kms {
             candidates.truncate(strips);
 
             let pick = [
-                (DrmFourcc::Abgr8888, Order::Rgba),
                 (DrmFourcc::Xbgr8888, Order::Rgba),
+                (DrmFourcc::Abgr8888, Order::Rgba),
                 (DrmFourcc::Xrgb8888, Order::Bgra),
                 (DrmFourcc::Argb8888, Order::Bgra),
             ];
@@ -764,14 +764,16 @@ pub mod kms {
                 req.add_property(*plane, props.handle("CRTC_Y")?, property::Value::SignedRange(0));
                 req.add_property(*plane, props.handle("CRTC_W")?, property::Value::UnsignedRange(strip as u64));
                 req.add_property(*plane, props.handle("CRTC_H")?, property::Value::UnsignedRange(h as u64));
-                if let Ok(zpos) = props.handle("zpos") {
-                    req.add_property(*plane, zpos, property::Value::UnsignedRange(1));
-                }
-                if let Ok(alpha) = props.handle("alpha") {
-                    req.add_property(*plane, alpha, property::Value::UnsignedRange(255));
-                }
-                if let Ok(blend) = props.handle("blend_op") {
-                    req.add_property(*plane, blend, property::Value::UnsignedRange(1));
+                if browser_layer {
+                    if let Ok(zpos) = props.handle("zpos") {
+                        req.add_property(*plane, zpos, property::Value::UnsignedRange(1));
+                    }
+                    if let Ok(alpha) = props.handle("alpha") {
+                        req.add_property(*plane, alpha, property::Value::UnsignedRange(255));
+                    }
+                    if let Ok(blend) = props.handle("blend_op") {
+                        req.add_property(*plane, blend, property::Value::UnsignedRange(1));
+                    }
                 }
                 planes.push((*plane, fb_prop));
             }
