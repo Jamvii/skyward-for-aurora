@@ -29,4 +29,6 @@ pub struct Aera {
     /// Pages opened in this session, newest last.
     pub history: Vec<String>,
     pub bookmarks: Vec<String>,
+    /// The display backend composites the frame below a transparent page.
+    pub gpu: bool,
 }

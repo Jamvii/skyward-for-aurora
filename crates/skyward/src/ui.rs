@@ -1732,9 +1732,28 @@ impl<'a> Pages<'a> {
         if panel.is_some() {
             // A display turned off comes on again with a frame drawn for it.
             if self.app.take_dirty() || !self.surface.is_on() {
+                self.app.state.aera.gpu = self.surface.supports_browser_layer();
                 let t0 = Instant::now();
                 self.app.compose(&mut self.screen, &self.fonts, &self.info, &self.shown_clock, now);
-                self.surface.present(&self.screen)?;
+                let browser = if self.app.screen() == Screen::AeraBrowser
+                    && self.surface.supports_browser_layer()
+                {
+                    let theme = self.app.theme();
+                    self.app.state.aera.frame.as_deref().map(|frame| (frame, skyward_ui::aera::browser_rect(&theme.m)))
+                } else {
+                    None
+                };
+                if let Err(e) = self.surface.present_browser(&self.screen, browser) {
+                    if browser.is_some() {
+                        skyward_sys::kmsg(&format!("the browser GPU layer failed: {e:#}"))?;
+                        self.surface.browser_layer_failed();
+                        self.app.state.aera.gpu = false;
+                        self.app.refresh();
+                        self.surface.present(&self.screen)?;
+                    } else {
+                        return Err(e);
+                    }
+                }
                 eprintln!("frame {:?} in {} ms", self.app.screen(), t0.elapsed().as_millis());
                 if let Some(path) = self.dump {
                     fs::write(path, &self.screen.data).with_context(|| format!("write {}", path.display()))?;

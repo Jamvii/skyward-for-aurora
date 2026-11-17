@@ -1,4 +1,5 @@
 use crate::canvas::Canvas;
+use crate::geom::Rect;
 use anyhow::Result;
 
 /// A present target. The device backend scans out through KMS; the host
@@ -12,6 +13,17 @@ pub trait Surface {
     fn present(&mut self, canvas: &Canvas) -> Result<()>;
     /// Wait until the frame presented last is on the panel.
     fn settle(&mut self) -> Result<()>;
+    /// Whether the backend can put the browser frame on its own layer under
+    /// a transparent page.
+    fn supports_browser_layer(&self) -> bool { false }
+    /// Present a page, with the browser frame in `browser` composited under
+    /// it by the display backend when supported.
+    fn present_browser(&mut self, canvas: &Canvas, browser: Option<(&[u8], Rect)>) -> Result<()> {
+        let _ = browser;
+        self.present(canvas)
+    }
+    /// The browser layer failed; fall back to drawing it into the page.
+    fn browser_layer_failed(&mut self) {}
 }
 
 /// How Qualcomm's display driver drives a mode, from the text of the
@@ -259,6 +271,8 @@ pub mod kms {
     enum Order {
         Rgba,
         Bgra,
+        /// AERA's B,G,R,A bytes, copied straight into XBGR/ABGR.
+        Browser,
     }
 
     struct Buf {
@@ -487,6 +501,14 @@ pub mod kms {
         /// The planes showing the buffer, one per layer mixer, with their
         /// FB_ID properties.
         planes: Vec<(plane::Handle, property::Handle)>,
+        /// An overlay plane below the UI, showing the browser frame.
+        overlay: Option<(plane::Handle, property::Handle, Props)>,
+        /// The primary planes can blend the transparent page over that
+        /// overlay.
+        browser_layer: bool,
+        /// The browser frame's own scanout buffer.
+        browser: Option<Buf>,
+        browser_order: Order,
         /// The CRTC driving the panel, with its ACTIVE and MODE_ID
         /// properties.
         crtc: drm::control::crtc::Handle,
@@ -610,8 +632,8 @@ pub mod kms {
             candidates.truncate(strips);
 
             let pick = [
-                (DrmFourcc::Xbgr8888, Order::Rgba),
                 (DrmFourcc::Abgr8888, Order::Rgba),
+                (DrmFourcc::Xbgr8888, Order::Rgba),
                 (DrmFourcc::Xrgb8888, Order::Bgra),
                 (DrmFourcc::Argb8888, Order::Bgra),
             ];
@@ -633,6 +655,39 @@ pub mod kms {
                 Ok(Buf { db, fb, map: map.cast(), len })
             };
             let bufs = [make()?, make()?, make()?];
+            let browser_fourcc = [DrmFourcc::Xbgr8888, DrmFourcc::Abgr8888]
+                .into_iter()
+                .find(|f| candidates.iter().all(|c| c.1.contains(&(*f as u32))))
+                .ok_or_else(|| anyhow!("no 32-bit browser frame format"))?;
+            let browser = {
+                let db = card.create_dumb_buffer((1080, 2100), browser_fourcc, 32).context("create browser buffer")?;
+                let fb = card.add_planar_framebuffer(&Planar(&db), FbCmd2Flags::empty()).context("add browser framebuffer")?;
+                let len = buffer::Buffer::pitch(&db) as usize * 2100;
+                let offset = drm_ffi::mode::dumbbuffer::map(card.as_fd(), buffer::Buffer::handle(&db).into(), 0, 0).context("map browser buffer")?.offset;
+                let fd = card.as_fd().as_raw_fd();
+                let map = unsafe { libc::mmap(std::ptr::null_mut(), len, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, fd, offset as libc::off_t) };
+                if map == libc::MAP_FAILED {
+                    return Err(std::io::Error::last_os_error()).context("mmap browser buffer");
+                }
+                Buf { db, fb, map: map.cast(), len }
+            };
+            let mut overlay = None;
+            for p in card.plane_handles().context("list planes")? {
+                let info = card.get_plane(p).context("read plane")?;
+                let props = Props::read(&card, p)?;
+                if props.value("type")? == PlaneType::Overlay as u64
+                    && res.filter_crtcs(info.possible_crtcs()).contains(&crtc)
+                    && info.formats().contains(&(browser_fourcc as u32))
+                    && props.handle("zpos").is_ok()
+                {
+                    overlay = Some((p, props.handle("FB_ID")?, props));
+                    break;
+                }
+            }
+
+            let primary_alpha = candidates.iter().all(|c| c.2.handle("alpha").is_ok());
+            let primary_blend = candidates.iter().all(|c| c.2.handle("pixel blend mode").is_ok());
+            let browser_layer = overlay.is_some() && primary_alpha && primary_blend;
 
             let crtc_id = u64::from(u32::from(crtc));
             let mut req = atomic::AtomicModeReq::new();
@@ -704,6 +759,17 @@ pub mod kms {
                 req.add_property(*plane, props.handle("CRTC_Y")?, property::Value::SignedRange(0));
                 req.add_property(*plane, props.handle("CRTC_W")?, property::Value::UnsignedRange(strip as u64));
                 req.add_property(*plane, props.handle("CRTC_H")?, property::Value::UnsignedRange(h as u64));
+                if let Ok(zpos) = props.handle("zpos") {
+                    req.add_property(*plane, zpos, property::Value::UnsignedRange(1));
+                }
+                if let Ok(alpha) = props.handle("alpha") {
+                    req.add_property(*plane, alpha, property::Value::UnsignedRange(255));
+                }
+                if let Ok(blend) = props.handle("pixel blend mode")
+                    && let Ok(value) = enum_value(&card, blend, "Pre-multiplied")
+                {
+                    req.add_property(*plane, blend, property::Value::UnsignedRange(value));
+                }
                 planes.push((*plane, fb_prop));
             }
             // The panel comes up in its preferred mode, then switches to the
@@ -734,6 +800,10 @@ pub mod kms {
                 back: 1,
                 flipping: false,
                 planes,
+                overlay,
+                browser_layer,
+                browser: Some(browser),
+                browser_order: if browser_fourcc == DrmFourcc::Abgr8888 { Order::Rgba } else { Order::Browser },
                 crtc,
                 active,
                 mode_id,
@@ -856,6 +926,19 @@ pub mod kms {
         /// A display turned off comes on again with the frame, in the
         /// panel's preferred mode, as it first came up.
         fn present(&mut self, canvas: &Canvas) -> Result<()> {
+            self.present_browser(canvas, None)
+        }
+
+        fn supports_browser_layer(&self) -> bool {
+            self.browser_layer && self.browser.is_some()
+        }
+
+        fn browser_layer_failed(&mut self) {
+            self.browser_layer = false;
+            self.overlay = None;
+        }
+
+        fn present_browser(&mut self, canvas: &Canvas, browser: Option<(&[u8], Rect)>) -> Result<()> {
             if (canvas.w, canvas.h) != (self.w, self.h) {
                 return Err(anyhow!("canvas {}x{} does not match the display {}x{}", canvas.w, canvas.h, self.w, self.h));
             }
@@ -868,7 +951,7 @@ pub mod kms {
                 let src = &canvas.data[y * row..(y + 1) * row];
                 let out = &mut dst[y * pitch..y * pitch + row];
                 match order {
-                    Order::Rgba => out.copy_from_slice(src),
+                    Order::Rgba | Order::Browser => out.copy_from_slice(src),
                     Order::Bgra => {
                         for (o, s) in out.as_chunks_mut::<4>().0.iter_mut().zip(src.as_chunks::<4>().0) {
                             *o = [s[2], s[1], s[0], s[3]];
@@ -879,6 +962,47 @@ pub mod kms {
             let mut req = atomic::AtomicModeReq::new();
             for &(plane, fb_prop) in &self.planes {
                 req.add_property(plane, fb_prop, property::Value::Framebuffer(Some(buf.fb)));
+            }
+            if let (Some(browser), Some((frame, area))) = (self.browser.as_ref(), browser) {
+                if self.browser_layer && frame.len() == 1080 * 2100 * 4 {
+                    let pitch = buffer::Buffer::pitch(&browser.db) as usize;
+                    let dst = unsafe { std::slice::from_raw_parts_mut(browser.map, browser.len) };
+                    let swap = matches!(self.browser_order, Order::Rgba);
+                    for y in 0..2100 {
+                        let src = &frame[y * 1080 * 4..(y + 1) * 1080 * 4];
+                        let out = &mut dst[y * pitch..y * pitch + 1080 * 4];
+                        if swap {
+                            for (o, s) in out.as_chunks_mut::<4>().0.iter_mut().zip(src.as_chunks::<4>().0) {
+                                *o = [s[2], s[1], s[0], 255];
+                            }
+                        } else {
+                            out.copy_from_slice(src);
+                        }
+                    }
+                    if let Some((plane, fb_prop, props)) = &self.overlay {
+                        req.add_property(*plane, *fb_prop, property::Value::Framebuffer(Some(browser.fb)));
+                        if let Ok(zpos) = props.handle("zpos") {
+                            req.add_property(*plane, zpos, property::Value::UnsignedRange(0));
+                        }
+                        if let Ok(alpha) = props.handle("alpha") {
+                            req.add_property(*plane, alpha, property::Value::UnsignedRange(255));
+                        }
+                        req.add_property(*plane, props.handle("SRC_X")?, property::Value::UnsignedRange(0));
+                        req.add_property(*plane, props.handle("SRC_Y")?, property::Value::UnsignedRange(0));
+                        req.add_property(*plane, props.handle("SRC_W")?, property::Value::UnsignedRange((1080u64) << 16));
+                        req.add_property(*plane, props.handle("SRC_H")?, property::Value::UnsignedRange((2100u64) << 16));
+                        req.add_property(*plane, props.handle("CRTC_X")?, property::Value::SignedRange(area.x as i64));
+                        req.add_property(*plane, props.handle("CRTC_Y")?, property::Value::SignedRange(area.y as i64));
+                        req.add_property(*plane, props.handle("CRTC_W")?, property::Value::UnsignedRange(area.w.max(1.0) as u64));
+                        req.add_property(*plane, props.handle("CRTC_H")?, property::Value::UnsignedRange(area.h.max(1.0) as u64));
+                        req.add_property(*plane, props.handle("CRTC_ID")?, property::Value::CRTC(Some(self.crtc)));
+                        if let Ok(alpha) = props.handle("alpha") {
+                            req.add_property(*plane, alpha, property::Value::UnsignedRange(255));
+                        }
+                    }
+                }
+            } else if let Some((plane, fb_prop, _)) = &self.overlay {
+                req.add_property(*plane, *fb_prop, property::Value::Framebuffer(None));
             }
             let mut flags = AtomicCommitFlags::NONBLOCK | AtomicCommitFlags::PAGE_FLIP_EVENT;
             if self.power != Power::On {

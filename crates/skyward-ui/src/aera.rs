@@ -21,7 +21,8 @@ pub fn browser(cx: &Ctx) -> Frame {
     let m = &t.m;
     let (w, h) = (m.w as f32, m.h as f32);
     let status_h = m.dp(48.0);
-    let mut c = Canvas::band(m.w, m.h, 0..m.h, 0..m.w, BLACK);
+    let transparent = Rgba { r: 0, g: 0, b: 0, a: 0 };
+    let mut c = Canvas::band(m.w, m.h, 0..m.h, 0..m.w, if s.aera.gpu { transparent } else { BLACK });
     let mut out = Vec::new();
 
     // The system status bar keeps its own white area; the page starts below.
@@ -29,8 +30,10 @@ pub fn browser(cx: &Ctx) -> Frame {
     let bar_h = m.dp(112.0);
     let area = Rect::new(0.0, status_h, w, h - status_h - bar_h);
     let shown = frame_rect(area);
-    if let Some(frame) = &s.aera.frame {
-        draw_frame(&mut c, frame, area);
+    if !s.aera.gpu {
+        if let Some(frame) = &s.aera.frame {
+            draw_frame(&mut c, frame, area);
+        }
     }
 
     // A white round back button floats under the status bar.
@@ -174,6 +177,9 @@ pub fn browser(cx: &Ctx) -> Frame {
     // Keep the back button above the page's touch grid and sheets.
     out.push(Hit { rect: back, action: Action::Back });
     let mut page = Frame::new(t, c, out, "AERA", 0.0);
+    if s.aera.gpu {
+        page.bg = transparent;
+    }
     page.back = false;
     page.header = false;
     page
@@ -223,6 +229,12 @@ fn button_icon(c: &mut Canvas, t: &crate::theme::Theme, kind: Button, r: Rect) {
             c.line(cx - s, cy + s, cx + s, cy + s, m.dp(2.0), ink);
         }
     }
+}
+
+/// The letter-boxed rectangle the browser frame occupies on screen.
+pub fn browser_rect(m: &crate::theme::Metrics) -> Rect {
+    let status = m.dp(48.0);
+    frame_rect(Rect::new(0.0, status, m.w as f32, m.h as f32 - status - m.dp(112.0)))
 }
 
 /// Where a screen point lies in AERA's 360x700 view.
