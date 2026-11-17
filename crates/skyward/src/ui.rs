@@ -2450,38 +2450,55 @@ fn aera_log(line: &str) {
 fn ensure_aera_runtime() -> Result<()> {
     let runtime = Path::new("/tmp/aera-web");
     let worker = runtime.join("usr/bin/aera-browser-worker");
-    let archive = Path::new("/sdcard/aera-runtime.tar.gz");
+    let tar = Path::new("/sdcard/aera-runtime.tar.gz");
+    let zip = Path::new("/sdcard/aera-runtime.zip");
     let marker = Path::new("/skyward/run/aera-runtime.size");
+    // The release package is a zip; the older tar is still accepted.
+    let (archive, is_zip) = if zip.is_file() {
+        (zip, true)
+    } else if tar.is_file() {
+        (tar, false)
+    } else {
+        anyhow::bail!("put skyward-aera-extension-0.3.5.zip in internal storage as /sdcard/aera-runtime.zip, or aera-runtime.tar.gz");
+    };
     let marked = archive.metadata().ok().map(|m| m.len()).is_some_and(|len| {
         fs::read_to_string(marker).ok().and_then(|s| s.trim().parse::<u64>().ok()) == Some(len)
     });
     if worker.is_file() && marked {
-        // The unpacked runtime matches the tar's size.
         return Ok(());
-    }
-    // A missing or stale size marker means this worker is from an older
-    // runtime; unpack the current tar.
-    if !archive.is_file() {
-        anyhow::bail!("put aera-runtime.tar.gz in internal storage, or unpack it to /tmp/aera-web");
     }
     if runtime.exists() {
         std::fs::remove_dir_all(runtime).with_context(|| format!("clear {}", runtime.display()))?;
     }
-    std::fs::create_dir_all(runtime).with_context(|| format!("make {}", runtime.display()))?;
-    let status = std::process::Command::new("/system/bin/tar")
-        .args(["-xzf"])
-        .arg(archive)
-        .arg("-C")
-        .arg(runtime)
-        .status()
-        .with_context(|| "run tar for the AERA runtime")?;
-    anyhow::ensure!(status.success(), "tar could not unpack the AERA runtime");
+    if is_zip {
+        // The extension zip carries a top-level aera-web/ directory.
+        let status = std::process::Command::new("/system/bin/unzip")
+            .args(["-q", "-o"])
+            .arg(archive)
+            .arg("-d")
+            .arg("/tmp")
+            .status()
+            .with_context(|| "run unzip for the AERA extension")?;
+        anyhow::ensure!(status.success(), "unzip could not unpack the AERA extension");
+    } else {
+        std::fs::create_dir_all(runtime).with_context(|| format!("make {}", runtime.display()))?;
+        let status = std::process::Command::new("/system/bin/tar")
+            .args(["-xzf"])
+            .arg(archive)
+            .arg("-C")
+            .arg(runtime)
+            .status()
+            .with_context(|| "run tar for the AERA runtime")?;
+        anyhow::ensure!(status.success(), "tar could not unpack the AERA runtime");
+    }
+    anyhow::ensure!(worker.is_file(), "the AERA extension has no {}", worker.display());
     if let Ok(meta) = archive.metadata() {
         let _ = fs::create_dir_all("/skyward/run");
         let _ = fs::write(marker, meta.len().to_string());
     }
     Ok(())
 }
+
 
 /// A file-like URL the browser is navigating to; WebKit's response policy
 /// does not turn these into downloads in this worker, so the manager fetches
