@@ -288,8 +288,8 @@ pub fn home(cx: &Ctx) -> Frame {
         rows.push(Row::new(l.pick(WLAN)).icon(BLUE, Icon::Wlan).trail(Trail::Value(fmt::wlan_value(l, cx.state.wlan.as_ref().expect("checked")))));
         opens.push(Action::Open(Screen::Wlan));
     }
-    rows.push(Row::new(l.pick(["AERA 浏览器", "AERA 瀏覽器", "AERA Browser"])).icon(BLUE, Icon::Globe).trail(Trail::Arrow));
-    opens.push(Action::Open(Screen::AeraBrowser));
+    rows.push(Row::new(l.pick(["浏览器", "瀏覽器", "Browser"])).icon(BLUE, Icon::Globe).trail(Trail::Arrow));
+    opens.push(Action::Open(Screen::Browser));
     let starts = systems_value(cx);
     if cx.state.offers(Screen::Systems) {
         let row = Row::new(l.pick(DUAL_BOOT)).icon(PURPLE, Icon::Systems);
