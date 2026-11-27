@@ -2492,6 +2492,20 @@ fn ensure_aera_runtime() -> Result<()> {
         anyhow::ensure!(status.success(), "tar could not unpack the AERA runtime");
     }
     anyhow::ensure!(worker.is_file(), "the AERA extension has no {}", worker.display());
+    // Zip extraction need not keep Unix modes; the worker and the WebKit
+    // helpers must be executable for the jail to run them.
+    for rel in [
+        "usr/bin/aera-browser-worker",
+        "usr/libexec/wpe-webkit-2.0/WPEWebProcess",
+        "usr/libexec/wpe-webkit-2.0/WPENetworkProcess",
+        "usr/libexec/gstreamer-1.0/gst-plugin-scanner",
+    ] {
+        let path = runtime.join(rel);
+        if path.is_file() {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o755));
+        }
+    }
     if let Ok(meta) = archive.metadata() {
         let _ = fs::create_dir_all("/skyward/run");
         let _ = fs::write(marker, meta.len().to_string());
@@ -2547,6 +2561,7 @@ fn download_address(address: &str) -> Option<&str> {
         }
         let changed = process.session().poll();
         let mut redraw = false;
+        let mut frame_redraw = false;
         let mut side_download = None;
         if changed {
             let now_at = Instant::now();
@@ -2559,9 +2574,21 @@ fn download_address(address: &str) -> Option<&str> {
                 .is_none_or(|last| now_at.duration_since(last) >= Duration::from_millis(interval));
             if due && self.app.screen() == Screen::AeraBrowser {
                 if let Some(frame) = process.session().frame() {
-                    self.app.state.aera.frame = Some(frame.to_vec());
+                    // Reuse the page's frame allocation; copying 9 MB into
+                    // a fresh Vec every 33 ms was most of the browser's
+                    // allocation churn.
+                    let buf = self
+                        .app
+                        .state
+                        .aera
+                        .frame
+                        .get_or_insert_with(|| Vec::with_capacity(frame.len()));
+                    if buf.len() != frame.len() {
+                        buf.resize(frame.len(), 0);
+                    }
+                    buf.copy_from_slice(frame);
                     self.aera_frame_at = Some(now_at);
-                    redraw = true;
+                    frame_redraw = true;
                 }
             }
             // Always acknowledge: the worker may publish the newest frame
@@ -2621,6 +2648,13 @@ fn download_address(address: &str) -> Option<&str> {
         }
         if redraw {
             self.app.refresh();
+        } else if frame_redraw {
+            // Only the viewport changed. Redrawing its rows keeps the
+            // toolbar, status bar and any sheet untouched.
+            let rect = skyward_ui::aera::browser_rect(&self.app.theme().m);
+            let top = rect.y.max(0.0) as u32;
+            let bottom = (rect.y + rect.h).max(0.0) as u32;
+            self.app.refresh_rows(top, bottom.min(self.screen.h));
         }
         Ok(())
     }

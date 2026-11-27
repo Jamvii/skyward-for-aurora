@@ -1770,7 +1770,7 @@ impl App {
 
     /// What the page shows changed only in rows `first..end`: draw those
     /// again, and the rest stays as drawn.
-    fn refresh_rows(&mut self, first: u32, end: u32) {
+    pub fn refresh_rows(&mut self, first: u32, end: u32) {
         if self.frame.is_none() {
             return;
         }

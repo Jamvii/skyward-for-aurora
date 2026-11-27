@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- AERA full mode now loads a small WPE policy hook inside the jail:
+  `target="_blank"` / `window.open` navigations stay in the same view, and
+  non-renderable responses (APK/ZIP/IMG) go to WebKit's download path.
+- The AERA worker's frames are coalesced to the newest frame, acknowledged
+  without waiting for a slow draw, and copied into one reusable buffer.
+- Browser frame updates redraw only the viewport rows instead of the whole
+  page.
+- Zip-based AERA runtimes have the worker and WebKit helper executables
+  repaired after extraction; download directories use the sticky bit.
+
 ## 0.3.5 — Aurora
 
 Skyward 0.3.5 is the first release with the AERA WPE browser as the basic

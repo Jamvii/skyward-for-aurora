@@ -18,6 +18,9 @@ const BPF_K: u16 = 0x00;
 const SECCOMP_RET_ALLOW: u32 = 0x7fff_0000;
 const SECCOMP_MODE_FILTER: libc::c_ulong = 2;
 
+#[cfg(target_arch = "aarch64")]
+static WPE_HOOK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/libskyward_wpe_hook.so"));
+
 fn main() -> ExitCode {
     let mut args = std::env::args_os().skip(1);
     let browser = matches!(args.next().as_deref(), Some(arg) if arg == "--browser");
@@ -83,7 +86,7 @@ fn run(root: &Path) -> Result<(), String> {
         // The worker is in neither media_rw nor root; the parent must be
         // traversable as well as the download folder writable.
         let _ = std::fs::set_permissions(Path::new("/sdcard/AERA"), std::os::unix::fs::PermissionsExt::from_mode(0o771));
-        let _ = std::fs::set_permissions(downloads, std::os::unix::fs::PermissionsExt::from_mode(0o777));
+        let _ = std::fs::set_permissions(downloads, std::os::unix::fs::PermissionsExt::from_mode(0o1777));
     }
     for (source, inside) in [
         (c"/sdcard/AERA/Downloads", "downloads"),
@@ -114,6 +117,19 @@ fn run(root: &Path) -> Result<(), String> {
 "#,
     );
     let _ = std::fs::set_permissions(&conf, std::os::unix::fs::PermissionsExt::from_mode(0o644));
+    // The WPE policy hook routes target="_blank" navigations into the same
+    // view and hands non-renderable responses to WebKit's download path. It
+    // is embedded in this launcher, so the runtime package does not have to
+    // carry another shared object.
+    #[cfg(target_arch = "aarch64")]
+    {
+        let hook = Path::new(&root_text).join("usr/lib/libskyward_wpe_hook.so");
+        if let Some(parent) = hook.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::write(&hook, WPE_HOOK).map_err(|e| format!("write the WPE policy hook: {e}"))?;
+        let _ = std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755));
+    }
     mount_fs(c"tmpfs", &join(&root_text, "dev"), c"tmpfs", libc::MS_NOSUID | libc::MS_NOEXEC, Some(c"size=1M,mode=0755"))?;
     for device in [c"/dev/null", c"/dev/zero", c"/dev/urandom", c"/dev/random"] {
         let inside = device.to_str().unwrap_or("").trim_start_matches('/');
@@ -179,7 +195,7 @@ fn run(root: &Path) -> Result<(), String> {
     // recovery, or it fails before libc sends DNS.
     let env: Vec<CString> = [
         "PATH=/usr/bin",
-        "LD_PRELOAD=/usr/lib/libaera-gpu.so",
+        "LD_PRELOAD=/usr/lib/libaera-gpu.so:/usr/lib/libskyward_wpe_hook.so",
         "HOME=/tmp",
         "TMPDIR=/tmp",
         "LANG=en.UTF-8",

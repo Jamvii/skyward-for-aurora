@@ -276,7 +276,13 @@ impl Session {
             }
             match message.kind() {
                 Some(Kind::Frame) => {
-                    if self.frame_pending || message.sequence != self.sequence.wrapping_add(1) {
+                    // A slow UI can let several frames queue. Keep the
+                    // newest one, acknowledging the one it replaces, so the
+                    // worker never waits on a frame nobody will draw.
+                    if self.frame_pending && !self.acknowledge() {
+                        break;
+                    }
+                    if self.sequence != 0 && message.sequence != self.sequence.wrapping_add(1) {
                         self.fail("browser frame sequence mismatch");
                         break;
                     }
