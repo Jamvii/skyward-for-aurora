@@ -386,6 +386,9 @@ impl App {
         self.state.aera.address.clear();
         self.state.aera.loaded.clear();
         self.state.aera.status.clear();
+        self.state.aera.back.clear();
+        self.state.aera.forward.clear();
+        self.state.aera.last_good = None;
         self.state.aera.failed = None;
         self.state.aera.can_back = false;
         self.state.aera.can_forward = false;

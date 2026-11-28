@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.6 — Aurora
 
 - The AERA reload button navigates to the last loaded URL, so it works even
   when WebKit ignores a bare Reload action.
@@ -27,8 +27,11 @@
   without waiting for a slow draw, and copied into one reusable buffer.
 - Browser frame updates redraw only the viewport rows instead of the whole
   page.
-- Zip-based AERA runtimes have the worker and WebKit helper executables
-  repaired after extraction; download directories use the sticky bit.
+- Zip-based AERA runtimes select the newest package, include the package
+  path, size and mtime in the unpack marker, and repair every directory and
+  file after extraction. Recovery's umask 0077 otherwise leaves the jail's
+  uid 99090 unable to traverse to the worker.
+- AERA download directories use the sticky bit.
 
 ## 0.3.5 — Aurora
 
