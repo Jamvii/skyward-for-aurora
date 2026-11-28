@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The AERA reload button navigates to the last loaded URL, so it works even
+  when WebKit ignores a bare Reload action.
+- Leaving full mode closes the AERA worker immediately; the next full-mode
+  entry starts a fresh browser. Active AERA downloads are marked cancelled.
 - AERA full mode now loads a small WPE policy hook inside the jail:
   `target="_blank"` / `window.open` navigations stay in the same view, and
   non-renderable responses (APK/ZIP/IMG) go to WebKit's download path.

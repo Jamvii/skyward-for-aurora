@@ -1272,9 +1272,6 @@ struct Pages<'a> {
     /// When the last AERA frame was copied for the UI; frames arriving
     /// faster than the page can be scaled are dropped.
     aera_frame_at: Option<Instant>,
-    /// When the browser was left for Home, kept briefly so a download
-    /// starting on the way out is not cut off.
-    aera_home_since: Option<Instant>,
     /// A copy into the USB drive has it writable until the copy ends.
     usb_writable: bool,
     /// The WLAN, on a phone whose driver the recovery brings up.
@@ -1493,7 +1490,6 @@ impl<'a> Pages<'a> {
             download_jobs: Vec::new(),
             aera: None,
             aera_frame_at: None,
-            aera_home_since: None,
             usb_writable: false,
             wlan: None,
             scanned_at: Instant::now(),
@@ -2683,26 +2679,28 @@ fn download_address(address: &str) -> Option<&str> {
     fn decrypt_told(&mut self, now: u64) -> Result<()> {
         self.aera_told()?;
         self.downloads_told();
-        // Returning to the home page ends the browser process. Keep it while
-        // an AERA download runs, and for a short grace period so a download
-        // starting just as the page closes is seen and kept alive.
-        if self.app.screen() == Screen::Home && self.aera.is_some() {
-            let since = *self.aera_home_since.get_or_insert_with(Instant::now);
-            let background = self.app.state.downloads.items.iter().any(|d| {
-                d.source == skyward_ui::app::DownloadSource::Aera && d.active()
-            });
-            if !background && since.elapsed() >= Duration::from_secs(2) {
-                Self::aera_log("browser closed on returning home");
-                self.aera = None;
-                self.aera_frame_at = None;
-                self.aera_home_since = None;
-                self.app.state.aera.started = false;
-                self.app.state.aera.frame = None;
-                self.app.state.aera.keyboard = None;
-                self.app.refresh();
+        // Leaving the browser closes the worker outright, so the next
+        // full-mode entry starts from a clean WebKit process. The download
+        // manager is the one page that stays on top of the browser; going
+        // back from it to the browser must not kill the page.
+        if self.aera.is_some()
+            && self.app.screen() != Screen::AeraBrowser
+            && self.app.screen() != Screen::Downloads
+        {
+            Self::aera_log("browser closed on leaving full mode");
+            for item in &mut self.app.state.downloads.items {
+                if item.source == skyward_ui::app::DownloadSource::Aera && item.active() {
+                    item.state = skyward_ui::app::DownloadState::Cancelled;
+                }
             }
-        } else {
-            self.aera_home_since = None;
+            self.aera = None;
+            self.aera_frame_at = None;
+            self.app.state.aera.started = false;
+            self.app.state.aera.frame = None;
+            self.app.state.aera.keyboard = None;
+            self.app.state.aera.address_open = false;
+            self.app.state.aera.panel = None;
+            self.app.refresh();
         }
         let mut stream_dead = false;
         if let Some(worker) = &self.browser_stream {
@@ -3089,9 +3087,20 @@ impl Pages<'_> {
                 }
             }
             Effect::AeraReload => {
-                Self::aera_log("reload");
+                // WebKit's Reload action is a no-op on some page states.
+                // Navigate to the URL the worker last reported instead; the
+                // user gets a fresh load in every case.
+                let target = [self.app.state.aera.loaded.clone(), self.app.state.aera.address.clone()]
+                    .into_iter()
+                    .find(|u| u.starts_with("http://") || u.starts_with("https://"))
+                    .unwrap_or_default();
+                Self::aera_log(&format!("reload {target}"));
                 if let Some(process) = &mut self.aera {
-                    process.session().reload();
+                    if target.is_empty() {
+                        process.session().reload();
+                    } else {
+                        process.session().open(&target);
+                    }
                 }
             }
             Effect::AeraTap { x, y } => {
