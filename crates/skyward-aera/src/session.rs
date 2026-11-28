@@ -297,9 +297,15 @@ impl Session {
                     self.status = message.text();
                 }
                 Some(Kind::Error) => {
-                    self.status = message.text();
-                    self.fail(&self.status.clone());
-                    break;
+                    let error = message.text();
+                    // WebKit emits this when it hands a response to its
+                    // download manager. The download is not an error, and
+                    // the worker keeps running; do not fail the session.
+                    if error != "Frame load interrupted" {
+                        self.status = error.clone();
+                        self.fail(&error);
+                        break;
+                    }
                 }
                 Some(Kind::KeyboardShow) => self.keyboard = Keyboard::Show(message.value),
                 Some(Kind::KeyboardHide) => self.keyboard = Keyboard::Hide,

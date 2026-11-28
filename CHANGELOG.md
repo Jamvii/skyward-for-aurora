@@ -12,6 +12,8 @@
 - The AERA runtime is found under `/sdcard/aera-runtime.zip`, the release
   filename, or the Download/Skyward folders, and the package path is part of
   the unpack marker so a changed package is unpacked again.
+- WebKit's "Frame load interrupted" error is ignored: it is the normal
+  hand-off to the download manager, not a failed browser session.
 - AERA full mode now loads a small WPE policy hook inside the jail:
   `target="_blank"` / `window.open` navigations stay in the same view, and
   non-renderable responses (APK/ZIP/IMG) go to WebKit's download path.
