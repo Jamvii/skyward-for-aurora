@@ -2443,6 +2443,27 @@ fn aera_log(line: &str) {
 }
 
 /// Unpack the AERA runtime beside the worker when it is not there yet.
+/// Give every directory and file under the unpacked runtime the access the
+/// jailed uid 99090 needs, undoing recovery's umask 0077.
+fn make_runtime_traversable(runtime: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let mut dirs = vec![runtime.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o755));
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = fs::symlink_metadata(&path) else { continue };
+            if meta.file_type().is_dir() {
+                dirs.push(path);
+            } else if meta.is_file() {
+                let mode = if meta.permissions().mode() & 0o111 != 0 { 0o755 } else { 0o644 };
+                let _ = fs::set_permissions(&path, fs::Permissions::from_mode(mode));
+            }
+        }
+    }
+}
+
 fn ensure_aera_runtime() -> Result<()> {
     let runtime = Path::new("/tmp/aera-web");
     let worker = runtime.join("usr/bin/aera-browser-worker");
@@ -2467,6 +2488,7 @@ fn ensure_aera_runtime() -> Result<()> {
         // A runtime unpacked by hand is still usable when no package is
         // present; the automatic path is only needed to (re)unpack one.
         if worker.is_file() {
+            Self::make_runtime_traversable(runtime);
             return Ok(());
         }
         anyhow::bail!(
@@ -2486,6 +2508,11 @@ fn ensure_aera_runtime() -> Result<()> {
     let stamp = format!("{}\n{}\n{}", archive.display(), metadata.as_ref().map(|m| m.len()).unwrap_or(0), modified);
     let marked = fs::read_to_string(marker).ok().is_some_and(|s| s.trim() == stamp.trim());
     let _ = skyward_sys::kmsg(&format!("AERA runtime package: {}", archive.display()));
+    if worker.is_file() {
+        // Repair a runtime unpacked by an older build whose unzip ran under
+        // umask 0077, even when its marker still matches.
+        Self::make_runtime_traversable(runtime);
+    }
     if worker.is_file() && marked {
         return Ok(());
     }
@@ -2519,20 +2546,7 @@ fn ensure_aera_runtime() -> Result<()> {
         anyhow::ensure!(status.success(), "tar could not unpack the AERA runtime");
     }
     anyhow::ensure!(worker.is_file(), "the AERA extension has no {}", worker.display());
-    // Zip extraction need not keep Unix modes; the worker and the WebKit
-    // helpers must be executable for the jail to run them.
-    for rel in [
-        "usr/bin/aera-browser-worker",
-        "usr/libexec/wpe-webkit-2.0/WPEWebProcess",
-        "usr/libexec/wpe-webkit-2.0/WPENetworkProcess",
-        "usr/libexec/gstreamer-1.0/gst-plugin-scanner",
-    ] {
-        let path = runtime.join(rel);
-        if path.is_file() {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o755));
-        }
-    }
+    Self::make_runtime_traversable(runtime);
     let _ = skyward_sys::kmsg(&format!("AERA runtime unpacked: {}", archive.display()));
     let _ = fs::create_dir_all("/skyward/run");
     let _ = fs::write(marker, stamp.trim());
