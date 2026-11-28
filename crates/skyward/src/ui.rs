@@ -2446,20 +2446,34 @@ fn aera_log(line: &str) {
 fn ensure_aera_runtime() -> Result<()> {
     let runtime = Path::new("/tmp/aera-web");
     let worker = runtime.join("usr/bin/aera-browser-worker");
-    let tar = Path::new("/sdcard/aera-runtime.tar.gz");
-    let zip = Path::new("/sdcard/aera-runtime.zip");
     let marker = Path::new("/skyward/run/aera-runtime.size");
-    // The release package is a zip; the older tar is still accepted.
-    let (archive, is_zip) = if zip.is_file() {
-        (zip, true)
-    } else if tar.is_file() {
-        (tar, false)
-    } else {
-        anyhow::bail!("put skyward-aera-extension-0.3.5.zip in internal storage as /sdcard/aera-runtime.zip, or aera-runtime.tar.gz");
+    // Accept the release package under its own name as well as the name
+    // the UI asks for. Download copies often keep the release filename.
+    let candidates = [
+        Path::new("/sdcard/aera-runtime.zip"),
+        Path::new("/sdcard/skyward-aera-extension-0.3.5.zip"),
+        Path::new("/sdcard/Download/aera-runtime.zip"),
+        Path::new("/sdcard/Download/skyward-aera-extension-0.3.5.zip"),
+        Path::new("/sdcard/Download/Skyward/aera-runtime.zip"),
+        Path::new("/sdcard/Download/Skyward/skyward-aera-extension-0.3.5.zip"),
+        Path::new("/sdcard/aera-runtime.tar.gz"),
+    ];
+    let Some(archive) = candidates.iter().copied().find(|p| p.is_file()) else {
+        // A runtime unpacked by hand is still usable when no package is
+        // present; the automatic path is only needed to (re)unpack one.
+        if worker.is_file() {
+            return Ok(());
+        }
+        anyhow::bail!(
+            "put skyward-aera-extension-0.3.5.zip on internal storage as /sdcard/aera-runtime.zip (or leave its release name), or put aera-runtime.tar.gz there"
+        );
     };
-    let marked = archive.metadata().ok().map(|m| m.len()).is_some_and(|len| {
-        fs::read_to_string(marker).ok().and_then(|s| s.trim().parse::<u64>().ok()) == Some(len)
-    });
+    let is_zip = archive.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip"));
+    // The path is part of the marker: switching from tar to zip at the same
+    // byte length must still unpack the new package.
+    let stamp = format!("{}\n{}", archive.display(), archive.metadata().map(|m| m.len()).unwrap_or(0));
+    let marked = fs::read_to_string(marker).ok().is_some_and(|s| s.trim() == stamp.trim());
+    let _ = skyward_sys::kmsg(&format!("AERA runtime package: {}", archive.display()));
     if worker.is_file() && marked {
         return Ok(());
     }
@@ -2468,14 +2482,19 @@ fn ensure_aera_runtime() -> Result<()> {
     }
     if is_zip {
         // The extension zip carries a top-level aera-web/ directory.
-        let status = std::process::Command::new("/system/bin/unzip")
+        let output = std::process::Command::new("/system/bin/unzip")
             .args(["-q", "-o"])
             .arg(archive)
             .arg("-d")
             .arg("/tmp")
-            .status()
+            .output()
             .with_context(|| "run unzip for the AERA extension")?;
-        anyhow::ensure!(status.success(), "unzip could not unpack the AERA extension");
+        anyhow::ensure!(
+            output.status.success(),
+            "unzip could not unpack {}: {}",
+            archive.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
     } else {
         std::fs::create_dir_all(runtime).with_context(|| format!("make {}", runtime.display()))?;
         let status = std::process::Command::new("/system/bin/tar")
@@ -2502,10 +2521,8 @@ fn ensure_aera_runtime() -> Result<()> {
             let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o755));
         }
     }
-    if let Ok(meta) = archive.metadata() {
-        let _ = fs::create_dir_all("/skyward/run");
-        let _ = fs::write(marker, meta.len().to_string());
-    }
+    let _ = fs::create_dir_all("/skyward/run");
+    let _ = fs::write(marker, stamp.trim());
     Ok(())
 }
 

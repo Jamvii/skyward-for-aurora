@@ -9,6 +9,9 @@
 - The browser menu's full-mode entry opens the AERA start page instead of
   reusing the last URL. The reader's own full-mode link still hands over the
   page being read. Leaving full mode clears the address and loaded URL.
+- The AERA runtime is found under `/sdcard/aera-runtime.zip`, the release
+  filename, or the Download/Skyward folders, and the package path is part of
+  the unpack marker so a changed package is unpacked again.
 - AERA full mode now loads a small WPE policy hook inside the jail:
   `target="_blank"` / `window.open` navigations stay in the same view, and
   non-renderable responses (APK/ZIP/IMG) go to WebKit's download path.
