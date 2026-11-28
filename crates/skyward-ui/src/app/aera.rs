@@ -29,6 +29,12 @@ pub struct Aera {
     /// Pages opened in this session, newest last.
     pub history: Vec<String>,
     pub bookmarks: Vec<String>,
+    /// Successful URLs behind and ahead of the current one. These keep the
+    /// toolbar's back and forward working even when WebKit's own history is
+    /// empty after an error.
+    pub back: Vec<String>,
+    pub forward: Vec<String>,
+    pub last_good: Option<String>,
     /// The display backend composites the frame below a transparent page.
     pub gpu: bool,
 }

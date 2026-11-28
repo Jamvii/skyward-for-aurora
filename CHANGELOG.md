@@ -14,6 +14,12 @@
   the unpack marker so a changed package is unpacked again.
 - WebKit's "Frame load interrupted" error is ignored: it is the normal
   hand-off to the download manager, not a failed browser session.
+- Page-load errors no longer end the AERA session. A recoverable error
+  returns to the last successfully loaded URL, and a new URL can still be
+  entered afterwards.
+- Back and forward use an application-side successful-URL stack, with the
+  worker's own history as fallback, so the buttons keep working after an
+  error.
 - AERA full mode now loads a small WPE policy hook inside the jail:
   `target="_blank"` / `window.open` navigations stay in the same view, and
   non-renderable responses (APK/ZIP/IMG) go to WebKit's download path.

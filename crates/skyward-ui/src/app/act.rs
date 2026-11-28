@@ -325,8 +325,36 @@ impl App {
                 self.state.next_slot = Some(slot);
                 self.refresh();
             }
-            Action::AeraBack => return vec![Effect::AeraBack],
-            Action::AeraForward => return vec![Effect::AeraForward],
+            Action::AeraBack => {
+                if let Some(target) = self.state.aera.back.pop() {
+                    let current = self.state.aera.loaded.clone();
+                    if !current.is_empty() {
+                        self.state.aera.forward.push(current);
+                    }
+                    self.state.aera.address = target.clone();
+                    self.state.aera.loaded = target.clone();
+                    self.state.aera.status.clear();
+                    self.state.aera.panel = None;
+                    self.refresh();
+                    return vec![Effect::AeraOpen { url: target }];
+                }
+                return vec![Effect::AeraBack];
+            }
+            Action::AeraForward => {
+                if let Some(target) = self.state.aera.forward.pop() {
+                    let current = self.state.aera.loaded.clone();
+                    if !current.is_empty() {
+                        self.state.aera.back.push(current);
+                    }
+                    self.state.aera.address = target.clone();
+                    self.state.aera.loaded = target.clone();
+                    self.state.aera.status.clear();
+                    self.state.aera.panel = None;
+                    self.refresh();
+                    return vec![Effect::AeraOpen { url: target }];
+                }
+                return vec![Effect::AeraForward];
+            }
             Action::AeraReload => return vec![Effect::AeraReload],
             Action::AeraAddress => {
                 self.state.aera.address_open = true;
@@ -340,6 +368,11 @@ impl App {
                     self.say(l.pick(["请输入网址", "請輸入網址", "Type an address"]), now);
                 } else {
                     let target = browser_target(&input);
+                    let current = self.state.aera.loaded.clone();
+                    if !current.is_empty() && current != target {
+                        self.state.aera.back.push(current);
+                    }
+                    self.state.aera.forward.clear();
                     self.state.aera.loaded = target.clone();
                     self.state.aera.address = target.clone();
                     self.state.aera.address_open = false;

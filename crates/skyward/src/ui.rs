@@ -2652,6 +2652,20 @@ fn download_address(address: &str) -> Option<&str> {
             };
             self.app.aera_download(d.id, event, &d.name, d.done, d.total, error);
         }
+        if let Some(error) = session.take_error() {
+            if let Some(good) = self.app.state.aera.last_good.take() {
+                Self::aera_log(&format!("error {error}; returning to {good}"));
+                session.open(&good);
+                self.app.state.aera.address = good.clone();
+                self.app.state.aera.loaded = good;
+                self.app.state.aera.status.clear();
+                self.app.state.aera.failed = None;
+            } else {
+                Self::aera_log(&format!("error {error}"));
+                self.app.state.aera.status = error;
+            }
+            redraw = true;
+        }
         let status = session.status().to_string();
         let back = session.can_back();
         let forward = session.can_forward();
@@ -2660,14 +2674,30 @@ fn download_address(address: &str) -> Option<&str> {
                 Self::aera_log(&format!("status: {status}"));
             }
             if let Some(address) = Self::download_address(&status) {
-                side_download = Some(address.to_string());
+                // The WPE policy hook normally hands a binary response to
+                // WebKit's download manager. Only use the manual fallback
+                // when the manager has not already taken that file.
+                let name = skyward_ui::app::download_name(address);
+                let taken = self.app.state.downloads.items.iter().any(|d| {
+                    d.source == skyward_ui::app::DownloadSource::Aera && (d.name == name || d.active())
+                });
+                if !taken {
+                    side_download = Some(address.to_string());
+                }
             }
-            if (status.starts_with("http://") || status.starts_with("https://"))
-                && !self.app.state.aera.address_open
-                && self.app.state.aera.address != status
-            {
-                self.app.state.aera.address = status.clone();
-                self.app.state.aera.loaded = status.clone();
+            if status.starts_with("http://") || status.starts_with("https://") {
+                let previous = self.app.state.aera.loaded.clone();
+                if previous != status {
+                    if !previous.is_empty() {
+                        self.app.state.aera.back.push(previous);
+                    }
+                    self.app.state.aera.forward.clear();
+                    self.app.state.aera.loaded = status.clone();
+                }
+                if !self.app.state.aera.address_open {
+                    self.app.state.aera.address = status.clone();
+                }
+                self.app.state.aera.last_good = Some(status.clone());
             }
             self.app.state.aera.status = status;
             redraw = true;
@@ -2750,6 +2780,9 @@ fn download_address(address: &str) -> Option<&str> {
             self.app.state.aera.failed = None;
             self.app.state.aera.can_back = false;
             self.app.state.aera.can_forward = false;
+            self.app.state.aera.back.clear();
+            self.app.state.aera.forward.clear();
+            self.app.state.aera.last_good = None;
             self.app.refresh();
         }
         let mut stream_dead = false;

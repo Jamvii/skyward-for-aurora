@@ -47,6 +47,7 @@ pub struct Session {
     zoom: u32,
     keyboard: Keyboard,
     failed: Option<String>,
+    error: Option<String>,
     downloads: Vec<DownloadMessage>,
 }
 
@@ -110,6 +111,7 @@ impl Session {
             zoom: 100,
             keyboard: Keyboard::None,
             failed: None,
+            error: None,
             downloads: Vec::new(),
         })
     }
@@ -151,6 +153,12 @@ impl Session {
         std::mem::take(&mut self.downloads)
     }
 
+    /// A page-load error reported by the worker, which does not end the
+    /// session; the page can still navigate or go back.
+    pub fn take_error(&mut self) -> Option<String> {
+        self.error.take()
+    }
+
     /// Cancel one worker download by the id it announced.
     pub fn cancel_download(&mut self, id: u64) -> bool {
         let mut message = Message::new(Kind::DownloadCancel, id as u32);
@@ -188,6 +196,7 @@ impl Session {
     }
 
     pub fn open(&mut self, address: &str) -> bool {
+        self.error = None;
         self.send(Kind::Open, 0, 0, 0, address)
     }
 
@@ -291,6 +300,9 @@ impl Session {
                     changed = true;
                 }
                 Some(Kind::Status) => {
+                    if message.text().starts_with("http://") || message.text().starts_with("https://") {
+                        self.error = None;
+                    }
                     self.progress = message.value;
                     self.can_back = message.x != 0;
                     self.can_forward = message.y != 0;
@@ -298,13 +310,13 @@ impl Session {
                 }
                 Some(Kind::Error) => {
                     let error = message.text();
-                    // WebKit emits this when it hands a response to its
-                    // download manager. The download is not an error, and
-                    // the worker keeps running; do not fail the session.
+                    // WebKit uses this for a page that failed to load. It
+                    // does not end the worker: keep the channel usable for
+                    // a new URL or the history buttons. "Frame load
+                    // interrupted" is the normal hand-off to downloads.
                     if error != "Frame load interrupted" {
                         self.status = error.clone();
-                        self.fail(&error);
-                        break;
+                        self.error = Some(error);
                     }
                 }
                 Some(Kind::KeyboardShow) => self.keyboard = Keyboard::Show(message.value),
