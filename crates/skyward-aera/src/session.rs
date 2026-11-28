@@ -197,6 +197,7 @@ impl Session {
 
     pub fn open(&mut self, address: &str) -> bool {
         self.error = None;
+        self.status.clear();
         self.send(Kind::Open, 0, 0, 0, address)
     }
 
