@@ -2700,6 +2700,12 @@ fn download_address(address: &str) -> Option<&str> {
             self.app.state.aera.keyboard = None;
             self.app.state.aera.address_open = false;
             self.app.state.aera.panel = None;
+            self.app.state.aera.address.clear();
+            self.app.state.aera.loaded.clear();
+            self.app.state.aera.status.clear();
+            self.app.state.aera.failed = None;
+            self.app.state.aera.can_back = false;
+            self.app.state.aera.can_forward = false;
             self.app.refresh();
         }
         let mut stream_dead = false;
