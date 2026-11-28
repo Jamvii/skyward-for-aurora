@@ -2458,7 +2458,12 @@ fn ensure_aera_runtime() -> Result<()> {
         Path::new("/sdcard/Download/Skyward/skyward-aera-extension-0.3.5.zip"),
         Path::new("/sdcard/aera-runtime.tar.gz"),
     ];
-    let Some(archive) = candidates.iter().copied().find(|p| p.is_file()) else {
+    let archive = candidates
+        .iter()
+        .copied()
+        .filter(|p| p.is_file())
+        .max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok());
+    let Some(archive) = archive else {
         // A runtime unpacked by hand is still usable when no package is
         // present; the automatic path is only needed to (re)unpack one.
         if worker.is_file() {
@@ -2471,7 +2476,14 @@ fn ensure_aera_runtime() -> Result<()> {
     let is_zip = archive.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip"));
     // The path is part of the marker: switching from tar to zip at the same
     // byte length must still unpack the new package.
-    let stamp = format!("{}\n{}", archive.display(), archive.metadata().map(|m| m.len()).unwrap_or(0));
+    let metadata = archive.metadata().ok();
+    let modified = metadata
+        .as_ref()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let stamp = format!("{}\n{}\n{}", archive.display(), metadata.as_ref().map(|m| m.len()).unwrap_or(0), modified);
     let marked = fs::read_to_string(marker).ok().is_some_and(|s| s.trim() == stamp.trim());
     let _ = skyward_sys::kmsg(&format!("AERA runtime package: {}", archive.display()));
     if worker.is_file() && marked {
@@ -2521,6 +2533,7 @@ fn ensure_aera_runtime() -> Result<()> {
             let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o755));
         }
     }
+    let _ = skyward_sys::kmsg(&format!("AERA runtime unpacked: {}", archive.display()));
     let _ = fs::create_dir_all("/skyward/run");
     let _ = fs::write(marker, stamp.trim());
     Ok(())
