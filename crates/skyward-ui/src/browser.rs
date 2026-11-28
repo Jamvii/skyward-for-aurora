@@ -221,9 +221,9 @@ fn home(cx: &Ctx) -> Frame {
     y = list.bottom;
 
     y = widgets::section(&mut c, t, f, y, l.pick(["更多", "更多", "More"]));
-    let full = Row::new(l.pick(["完整模式（Linux Chromium）", "完整模式（Linux Chromium）", "Full mode (Linux Chromium)"]))
+    let full = Row::new(l.pick(["完整模式（AERA，测试中）", "完整模式（AERA，測試中）", "Full mode (AERA, testing)"]))
         .icon(PURPLE, Icon::Layers)
-        .subtitle(l.pick(["外置插件，解密后可安装", "外置外掛，解密後可安裝", "An external plugin, installed after decryption"]));
+        .subtitle(l.pick(["AERA WPE 浏览器，测试中，可能不稳定", "AERA WPE 瀏覽器，測試中，可能不穩定", "The AERA WPE browser, in testing and may be unstable"]));
     let list = widgets::list(&mut c, t, f, y, &[full]);
     out.extend(hits(&list.rows, &[Action::BrowserFull]));
     y = list.bottom;
@@ -1166,7 +1166,7 @@ pub fn menu(cx: &Ctx) -> Frame {
         .icon(ORANGE, Icon::Backup)
         .trail(Trail::None),
         Row::new(l.pick(["下载", "下載", "Downloads"])).icon(GREEN, Icon::Install).trail(Trail::Arrow),
-        Row::new(l.pick(["完整模式", "完整模式", "Full mode"])).icon(PURPLE, Icon::Layers).trail(Trail::Arrow),
+        Row::new(l.pick(["完整模式（AERA，测试中）", "完整模式（AERA，測試中）", "Full mode (AERA, testing)"])).icon(PURPLE, Icon::Layers).trail(Trail::Arrow),
     ];
     let list = widgets::list(&mut c, t, f, y, &rows);
     out.extend(hits(&list.rows, &[
@@ -1321,6 +1321,16 @@ fn decode_png(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::EXPAND);
     let mut reader = decoder.read_info().ok()?;
+    // Check the header's dimensions before the decoder sizes its output:
+    // a small PNG can name an enormous image, and allocating that many
+    // bytes aborts the whole recovery.
+    let (w, h) = {
+        let info = reader.info();
+        (info.width, info.height)
+    };
+    if w == 0 || h == 0 || w as u64 * h as u64 > 16_000_000 {
+        return None;
+    }
     let mut buf = vec![0; reader.output_buffer_size()];
     let info = reader.next_frame(&mut buf).ok()?;
     let (w, h) = (info.width, info.height);

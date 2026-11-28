@@ -35,8 +35,10 @@ use skyward_vab::{BootSlots, Hold, Slot, SnapshotState, Standing};
 
 mod act;
 mod backup;
+mod aera;
 mod browser;
 mod decrypt;
+mod downloads;
 mod draw;
 mod entry;
 mod filesystem;
@@ -64,6 +66,19 @@ mod wipe;
 mod wlan;
 
 pub use backup::*;
+pub use aera::{Aera, AeraPanel};
+pub use downloads::{DownloadSource, DownloadState, ManagerDownload, ManagerDownloads};
+pub use act::download_name;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DownloadEventKind { Started, Progress, Finished, Failed, Cancelled }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AeraTouchKind {
+    Down,
+    Move,
+    Up,
+}
 pub use browser::*;
 pub use decrypt::*;
 pub use entry::*;
@@ -126,7 +141,14 @@ pub enum Screen {
     /// The web, read as text, pictures and links.
     Browser,
     BrowserAddress,
+    /// The AERA WPE browser, its frame and its own address field.
+    AeraBrowser,
+    AeraAddress,
     BrowserDownloads,
+    /// The independent download manager.
+    Downloads,
+    /// A link to download, typed on the screen's keyboard.
+    DownloadLink,
     BrowserForm,
     BrowserFull,
     BrowserTabs,
@@ -268,6 +290,8 @@ pub enum Action {
     /// A swipe-to-confirm track; dragging the knob to the far end confirms.
     Confirm(Confirm),
     /// The pattern grid on the unlock page.
+    /// A finger dragging the AERA page: the last view coordinate sent.
+    Aera { x: u16, y: u16 },
     Pattern,
     /// Start receiving a package over USB.
     Sideload,
@@ -300,8 +324,11 @@ pub enum Action {
     RestorePart(usize),
     /// Stop backing up, or checking a backup before it is restored.
     StopBackup,
-    /// Tick or untick a log to export: the recovery's, the kernel's.
+    /// Tick or untick a log to export: the recovery's, the kernel's, the
+    /// basic browser's, the full browser's.
     LogPart(usize),
+    /// Keep copying the logs into one file until turned off.
+    LogContinuous,
     /// Save the logs to the temporary folder, or to internal storage.
     LogsTo(usize),
     /// Save the logs ticked where they are to go.
@@ -354,6 +381,25 @@ pub enum Action {
     BrowserPluginTap(u16, u16),
     BrowserPluginPinch(f32),
     BrowserPluginText,
+    AeraBack,
+    AeraForward,
+    AeraReload,
+    AeraAddress,
+    AeraOpen,
+    AeraTap(u16, u16),
+    AeraKey(u32),
+    AeraKeyboardHide,
+    AeraPanelOpen(AeraPanel),
+    AeraPanelClose,
+    AeraHistoryOpen(usize),
+    AeraBookmarkOpen(usize),
+    AeraBookmarkCurrent,
+    OpenDownloads,
+    OpenDownloadLink,
+    DownloadBegin,
+    DownloadCancel(u64),
+    DownloadRetry(u64),
+    DownloadClear,
     BrowserPluginScroll(f32),
     BrowserPluginReload,
     BrowserPluginStop,
@@ -576,6 +622,19 @@ pub enum Effect {
     BrowserPluginScroll { dy: i64 },
     BrowserPluginStop,
     BrowserPluginRemove { dir: String },
+    /// Start the AERA WPE runtime, and open `url` when it is there.
+    AeraStart { url: String },
+    AeraOpen { url: String },
+    AeraBack,
+    AeraForward,
+    AeraReload,
+    AeraTap { x: u16, y: u16 },
+    AeraTouch { kind: AeraTouchKind, x: u16, y: u16 },
+    /// Start a custom download into the manager.
+    DownloadStart { id: u64, url: String, name: String, path: String },
+    /// Stop one manager download.
+    DownloadStop { id: u64, source: DownloadSource },
+    AeraKey { value: u32 },
     /// List the folder at this path from the top of a place, to choose a
     /// file to install in, telling what it holds with [`App::set_place`].
     ReadPlace(Place, String),
@@ -653,7 +712,9 @@ pub enum Effect {
     /// Save the logs chosen, the recovery's own and the kernel's, into a
     /// folder of their own in internal storage or the temporary folder,
     /// saying where with [`App::report`].
-    ExportLogs { recovery: bool, kernel: bool, storage: bool },
+    ExportLogs { recovery: bool, kernel: bool, browser: bool, full: bool, storage: bool },
+    /// Start or stop copying the logs continuously into one file.
+    LogsContinuous { on: bool },
     /// Back up the parts ticked, by their place in [`BACKUP_PARTS`], into
     /// a folder of their own in `place`, telling how it goes with
     /// [`App::backup_started`], [`App::backup_plan`], [`App::backup_at`]
@@ -718,6 +779,8 @@ enum Drag {
     /// Scrolling a terminal's screen back through what the shell wrote, or
     /// the editor's text, `carry` being the part of a row not yet scrolled.
     History { last: f32, carry: f32, pitch: f32 },
+    /// A finger dragging the AERA page: the last view coordinate sent.
+    Aera { x: u16, y: u16 },
     Pattern,
     /// A finger that landed just after the panel lit; nothing it does
     /// counts until it lifts.
@@ -1416,6 +1479,7 @@ impl App {
                 || self.title.moving(now)
                 || self.bar.moving(now)
                 || self.morph.is_some()
+                || self.state.files_search_at.is_some()
                 || self.turn.is_some()
                 || self.row_press.is_some_and(|p| p.changing(now) || p.gone(now))
                 || self.glowing());
@@ -1465,6 +1529,14 @@ impl App {
     /// deadline goes away.
     pub fn tick(&mut self, now: u64) -> Vec<Effect> {
         let mut fx = Vec::new();
+        if let Some(at) = self.state.files_search_at {
+            let progress = ((now.saturating_sub(at) as f32) / 220.0).min(1.0);
+            self.state.files_search_anim = progress;
+            if progress >= 1.0 {
+                self.state.files_search_at = None;
+            }
+            self.dirty = true;
+        }
         // The key waiting for its partner in a screenshot, left alone long
         // enough, does what it does alone.
         if self.chord.is_some_and(|(_, at)| now >= at + CHORD_MS) {
@@ -1698,7 +1770,7 @@ impl App {
 
     /// What the page shows changed only in rows `first..end`: draw those
     /// again, and the rest stays as drawn.
-    fn refresh_rows(&mut self, first: u32, end: u32) {
+    pub fn refresh_rows(&mut self, first: u32, end: u32) {
         if self.frame.is_none() {
             return;
         }
